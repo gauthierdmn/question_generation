@@ -66,8 +66,10 @@ def build_vocab(sentence_filename, question_filename, word_vocab_filename, word2
     word_vocab = Counter(words)
     char_vocab = Counter(chars)
     # put them in a list ordered by frequency
-    word_vocab = ["--NULL--"] + ["--UNK--"] + ["--SOS--"] + ["--EOS--"] + sorted(word_vocab, key=word_vocab.get, reverse=True)
-    char_vocab = ["--NULL--"] + ["--UNK--"] + ["--SOS--"] + ["--EOS--"] + sorted(char_vocab, key=char_vocab.get, reverse=True)
+    word_vocab = ["--NULL--"] + ["--UNK--"] + ["--SOS--"] + ["--EOS--"] + \
+                  sorted(word_vocab, key=word_vocab.get, reverse=True)
+    char_vocab = ["--NULL--"] + ["--UNK--"] + ["--SOS--"] + ["--EOS--"] + \
+                  sorted(char_vocab, key=char_vocab.get, reverse=True)
     # limit the word vocabulary to top max_words
     word_vocab = word_vocab[:max_words]
     # get the word and char to ID dictionary mapping
@@ -156,9 +158,6 @@ def to_string(context, idx2word, start_idx, end_idx):
     if config.cuda:
         return " ".join([idx2word[i] for i in context.cpu().numpy().tolist()[start_idx: end_idx + 1]])
     else:
-        print("C:", context.numpy().tolist())
-        print("Start_idx:", start_idx)
-        print("End_idx:", end_idx)
         return " ".join([idx2word[i] for i in context.numpy().tolist()[start_idx: end_idx + 1]])
 
 

@@ -82,7 +82,6 @@ with open(os.path.join(config.train_dir, "word2idx.pkl"), "rb") as f:
     word2idx = pickle.load(f)
 
 idx2word = dict([(y, x) for x, y in word2idx.items()])
-print("Len vocab:", len(idx2word))
 
 # transform them into Tensors
 word_embedding_matrix = torch.from_numpy(np.array(word_embedding_matrix)).type(torch.float32)
@@ -110,6 +109,7 @@ print("Length of valid data loader is:", len(valid_dataloader))
 model = BiDAF(word_vectors=word_embedding_matrix,
               char_vectors=char_embedding_matrix,
               hidden_size=hyper_params["hidden_size"],
+              output_dim=len(idx2word),
               device=device)
 if hyper_params["pretrained"]:
     model.load_state_dict(torch.load(os.path.join(experiment_path, "model.pkl"))["state_dict"])

@@ -157,7 +157,6 @@ class BiDAFAttention(nn.Module):
         # (bs, c_len, c_len) x (bs, c_len, hid_size) => (bs, c_len, hid_size)
         b = torch.bmm(torch.bmm(s1, s2.transpose(1, 2)), c)
         x = torch.cat([c, a, c * a, c * b], dim=2)  # (bs, c_len, 4 * hid_size)
-        #x = torch.add(a, b)  # (bs, c_len, hid_size) --> we added the two context vectors
 
         return x
 
@@ -182,41 +181,6 @@ class BiDAFAttention(nn.Module):
         s = s0 + s1 + s2 + self.bias
 
         return s
-
-
-class Encoder(nn.Module):
-    def __init__(self, input_dim, emb_dim, hid_dim, n_layers, dropout):
-        super().__init__()
-
-        self.input_dim = input_dim
-        self.emb_dim = emb_dim
-        self.hid_dim = hid_dim
-        self.n_layers = n_layers
-        self.dropout = dropout
-
-        self.embedding = nn.Embedding(input_dim, emb_dim)
-
-        self.rnn = nn.LSTM(emb_dim, hid_dim, n_layers, batch_first=True, bidirectional=True, dropout=dropout)
-
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, src):
-
-        # src = [batch size, src sent len, ]
-
-        embedded = self.dropout(self.embedding(src))
-
-        # embedded = [batch size, src sent len, emb dim]
-
-        outputs, (hidden, cell) = self.rnn(embedded)
-
-        # outputs = [batch size, src sent len, hid dim * n directions]
-        # hidden = [batch size, n layers * n directions, hid dim]
-        # cell = [batch size, n layers * n directions, hid dim]
-
-        # outputs are always from the top hidden layer
-
-        return hidden, cell
 
 
 class Decoder(nn.Module):

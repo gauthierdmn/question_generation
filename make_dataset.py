@@ -144,7 +144,7 @@ class SquadPreprocessor:
         answer = [[w for w in word_tokenize(clean_text(doc.strip('\n')))] for doc in answer]
 
         # download vocabulary if not done yet
-        if directory == "train":
+        if None: #directory == "train":
             word_vocab, word2idx, char_vocab, char2idx = build_vocab(directory + ".sentence", directory + ".question",
                                                                      "word_vocab.pkl", "word2idx.pkl", "char_vocab.pkl",
                                                                      "char2idx.pkl", is_train=is_train,
@@ -162,8 +162,8 @@ class SquadPreprocessor:
                     char2idx = pickle.load(ci)
 
         print("Number of questions before filtering:", len(question))
-        filter = [len(s) < max_len_sentence and max([len(w) for w in s]) < max_len_word and len(s) > 3
-                  and len(q) < max_len_sentence and max([len(w) for w in q]) < max_len_word and len(q) > 3
+        filter = [len(s) < (max_len_sentence - 2) and max([len(w) for w in s]) < max_len_word and len(s) > 3
+                  and len(q) < (max_len_sentence - 2) and max([len(w) for w in q]) < max_len_word and len(q) > 3
                   for s, q in zip(sentence, question)]
         sentence, question, answer = zip(*[(s, q, a) for s, q, a, f in zip(
                                           sentence, question, answer, filter) if f])
@@ -200,19 +200,19 @@ class SquadPreprocessor:
             sentence_char_idxs.append(sentence_char_idx)
 
             question_idx[0] = word2idx["--SOS--"]
-            question_idx[len(q) - 1] = word2idx["--EOS--"]
-            question_char_idx[0] = word2idx["--SOS--"]
-            question_char_idx[len(q) - 1] = word2idx["--EOS--"]
-            for j, word in enumerate(1, q-1):
+            question_idx[len(q) + 1] = word2idx["--EOS--"]
+            question_char_idx[0, 0] = word2idx["--SOS--"]
+            question_char_idx[len(q) + 1, 0] = word2idx["--EOS--"]
+            for j, word in enumerate(q):
                 if word in word2idx:
-                    question_idx[j] = word2idx[word]
+                    question_idx[j + 1] = word2idx[word]   # j + 1 because the first token is "--SOS--"
                 else:
-                    question_idx[j] = 1
+                    question_idx[j + 1] = 1   # 1 stands for the unknown token
                 for k, char in enumerate(word):
                     if char in char2idx:
-                        question_char_idx[j, k] = char2idx[char]
+                        question_char_idx[j + 1, k] = char2idx[char]
                     else:
-                        question_char_idx[j, k] = 1
+                        question_char_idx[j + 1, k] = 1   # 1 stands for the unknown token
             question_idxs.append(question_idx)
             question_char_idxs.append(question_char_idx)
 
@@ -247,7 +247,7 @@ if __name__ == "__main__":
     maybe_download_squad(url, dev_filename, config.data_dir)
 
     p = SquadPreprocessor(config.data_dir, train_filename, dev_filename, tokenizer)
-    p.preprocess()
+    #p.preprocess()
 
     p.extract_features(max_len_sentence=config.max_len_sentence,
                        max_len_word=config.max_len_word, is_train=True)

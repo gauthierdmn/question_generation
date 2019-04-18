@@ -57,9 +57,10 @@ class Seq2Seq(nn.Module):
 
 
 class BiDAF(nn.Module):
-    def __init__(self, word_vectors, char_vectors, hidden_size, device, drop_prob=0.):
+    def __init__(self, word_vectors, char_vectors, hidden_size, output_dim, device, drop_prob=0.):
         super(BiDAF, self).__init__()
         self.hidden_size = hidden_size
+        self.output_dim = output_dim
 
         self.emb = layers.Embedding(word_vectors=word_vectors,
                                     char_vectors=char_vectors,
@@ -80,7 +81,7 @@ class BiDAF(nn.Module):
                                      drop_prob=drop_prob)
 
         self.dec = layers.Decoder(input_size=hidden_size,
-                                  output_dim=88444,
+                                  output_dim=output_dim,
                                   word_vectors=word_vectors,
                                   hidden_size=hidden_size,
                                   n_layers=1,
@@ -89,15 +90,15 @@ class BiDAF(nn.Module):
         self.device = device
 
     def forward(self, sw_idxs, sc_idxs, aw_idxs, ac_idxs, qw_idxs, teacher_forcing_ratio=0.5):
-        batch_size = sw_idxs.size()[0]
-        max_len = qw_idxs.size()[1]
+        batch_size = sw_idxs.size(0) #[0]
+        max_len = qw_idxs.size(1) #[1]
 
         s_mask = torch.zeros_like(sw_idxs) != sw_idxs
         a_mask = torch.zeros_like(aw_idxs) != aw_idxs
         s_len, a_len = s_mask.sum(-1), a_mask.sum(-1)
 
         # tensor to store decoder outputs
-        outputs = torch.zeros(batch_size, max_len, 88444).to(self.device)
+        outputs = torch.zeros(batch_size, max_len, self.output_dim).to(self.device)
 
         s_emb = self.emb(sw_idxs, sc_idxs)   # (batch_size, s_len, hidden_size)
         a_emb = self.emb(aw_idxs, ac_idxs)   # (batch_size, a_len, hidden_size)
@@ -109,7 +110,7 @@ class BiDAF(nn.Module):
 
         _, (hidden, cell) = self.mod(att, s_len)
 
-        # we add the forward and backward cells of the top LSTM layer
+        # we add the forward and backward hiddens and cells of the top LSTM layer to use for the decoder
         hidden = torch.add(hidden[-1], hidden[-2]).unsqueeze(0)
         cell = torch.add(cell[-1], cell[-2]).unsqueeze(0)
 

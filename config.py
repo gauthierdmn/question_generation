@@ -1,5 +1,5 @@
 # experiment ID
-exp = "expY"
+exp = "qg-1"
 
 # data directories
 data_dir = "/Users/gdamien/Data/squad/"
@@ -12,7 +12,7 @@ glove = "/Users/gdamien/Data/glove.6B/glove.6B.{}d.txt"
 squad_models = "/Users/gdamien/Data/squad/models/"
 
 # preprocessing values
-max_words = -1
+max_words = 40000
 word_embedding_size = 100
 char_embedding_size = 8
 max_len_sentence = 50
