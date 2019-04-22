@@ -7,6 +7,29 @@ from utils import masked_softmax
 import config
 
 
+class DecEmbedding(nn.Module):
+    """Embedding layer used by BiDAF, with Words and Characters.
+    Args:
+        word_vectors (torch.Tensor): Pre-trained word vectors.
+        char_vectors (torch.Tensor): Randomly initialized char vectors
+        hidden_size (int): Size of hidden activations.
+        drop_prob (float): Probability of zero-ing out activations
+    """
+    def __init__(self, word_vectors, hidden_size, drop_prob):
+        super(DecEmbedding, self).__init__()
+        self.drop_prob = drop_prob
+        self.w_embed = nn.Embedding.from_pretrained(word_vectors, freeze=True)
+        self.proj = nn.Linear(word_vectors.size(1), hidden_size, bias=False)
+
+    def forward(self, x):
+
+        w_emb = self.w_embed(x)   # (batch_size, seq_len, embed_size)
+        w_emb = F.dropout(w_emb, self.drop_prob, self.training)
+        w_emb = self.proj(w_emb)  # (batch_size, seq_len, hidden_size)
+
+        return w_emb
+
+
 class Embedding(nn.Module):
     """Embedding layer used by BiDAF, with Words and Characters.
     Args:
@@ -198,7 +221,7 @@ class Decoder(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, input, hidden, cell):
+    def forward(self, input, enc_hidden, hidden, cell):
         # input = [batch size]
         # hidden = [n layers * n directions, batch size, hid dim]
         # cell = [n layers * n directions, batch size, hid dim]
@@ -211,7 +234,9 @@ class Decoder(nn.Module):
 
         embedded = self.dropout(self.embedding(input))   # (batch size, 1, emb dim)
 
-        output, (hidden, cell) = self.rnn(embedded, (hidden, cell))
+        dec_input = torch.cat((embedded, enc_hidden.permute(1, 0, 2)), dim=2).float()
+
+        output, (hidden, cell) = self.rnn(dec_input, (hidden, cell))
 
         # output = [batch size, sent len, hid dim * n directions]
         # hidden = [batch size, n layers * n directions, hid dim]
@@ -228,6 +253,105 @@ class Decoder(nn.Module):
 
         # Softmax of prediction?
         softmax_fn = F.log_softmax # if log_softmax else F.softmax
+        probs = softmax_fn(prediction, dim=1)
+
+        return probs, hidden, cell
+
+
+# Luong attention layer
+class Attn(torch.nn.Module):
+    def __init__(self, method, hidden_size):
+        super(Attn, self).__init__()
+        self.method = method
+        if self.method not in ['dot', 'general', 'concat']:
+            raise ValueError(self.method, "is not an appropriate attention method.")
+        self.hidden_size = hidden_size
+        if self.method == 'general':
+            self.attn = torch.nn.Linear(self.hidden_size, hidden_size)
+        elif self.method == 'concat':
+            self.attn = torch.nn.Linear(self.hidden_size * 2, hidden_size)
+            self.v = torch.nn.Parameter(torch.FloatTensor(hidden_size))
+
+    def dot_score(self, hidden, encoder_output):
+        return torch.sum(hidden * encoder_output, dim=2)
+
+    def general_score(self, hidden, encoder_output):
+        energy = self.attn(encoder_output)
+        return torch.sum(hidden * energy, dim=2)
+
+    def concat_score(self, hidden, encoder_output):
+        hidden = hidden.permute(1, 0, 2)
+        energy = self.attn(torch.cat((hidden.expand(encoder_output.size(0), -1, -1), encoder_output), 2)).tanh()
+        return torch.sum(self.v * energy, dim=2)
+
+    def forward(self, hidden, encoder_outputs):
+        # Calculate the attention weights (energies) based on the given method
+        if self.method == 'general':
+            attn_energies = self.general_score(hidden, encoder_outputs)
+        elif self.method == 'concat':
+            attn_energies = self.concat_score(hidden, encoder_outputs)
+        elif self.method == 'dot':
+            attn_energies = self.dot_score(hidden, encoder_outputs)
+
+        # Transpose max_length and batch_size dimensions
+        attn_energies = attn_energies.t()
+
+        # Return the softmax normalized probability scores (with added dimension)
+        return F.softmax(attn_energies, dim=1).unsqueeze(1)
+
+
+class AttnDecoder(nn.Module):
+    def __init__(self, input_size, output_dim, word_vectors, hidden_size, n_layers, dropout):
+        super(AttnDecoder, self).__init__()
+
+        self.n_layers = n_layers
+        self.dropout = dropout
+
+        self.embedding = nn.Embedding.from_pretrained(word_vectors, freeze=True)
+
+        self.rnn = nn.LSTM(input_size, hidden_size, n_layers, batch_first=True, bidirectional=False, dropout=dropout)
+
+        self.attn = Attn(method="concat",
+                         hidden_size=hidden_size)
+
+        self.concat = nn.Linear(hidden_size * 2, hidden_size)
+
+        self.out = nn.Linear(hidden_size, output_dim)
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, input, enc_hidden, hidden, cell):
+        # input = [batch size]
+        # hidden = [n layers * n directions, batch size, hid dim]
+        # cell = [n layers * n directions, batch size, hid dim]
+
+        # n directions in the decoder will both always be 1, therefore:
+        # hidden = [n layers, batch size, hid dim]
+        # context = [n layers, batch size, hid dim]
+
+        input = input.unsqueeze(1)  # (batch size, 1)
+
+        embedded = self.dropout(self.embedding(input))   # (batch size, 1, emb dim)
+
+        # Forward through unidirectional LSTM
+        rnn_output, (hidden, cell) = self.rnn(embedded, (hidden, cell))
+
+        # Calculate attention weights from the current GRU output
+        attn_weights = self.attn(rnn_output, enc_hidden)
+        # Multiply attention weights to encoder outputs to get new "weighted sum" context vector
+        context = attn_weights.bmm(enc_hidden.transpose(0, 1))
+        # Concatenate weighted context vector and GRU output using Luong eq. 5
+        rnn_output = rnn_output.squeeze(0)
+        context = context.squeeze(1)
+        concat_input = torch.cat((rnn_output.squeeze(1), context), 1)
+        concat_output = torch.tanh(self.concat(concat_input))
+
+        prediction = self.out(concat_output.squeeze(1))
+
+        # prediction = [batch size, output dim]
+
+        # Softmax of prediction?
+        softmax_fn = F.log_softmax  # if log_softmax else F.softmax
         probs = softmax_fn(prediction, dim=1)
 
         return probs, hidden, cell

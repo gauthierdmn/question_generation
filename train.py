@@ -10,7 +10,7 @@ from tensorboardX import SummaryWriter
 
 # internal utilities
 import config
-from model import BiDAF
+from model import BiDAF, Seq2Seq
 from data_loader import SquadDataset
 from utils import save_checkpoint, compute_batch_metrics
 
@@ -106,11 +106,12 @@ print("Length of training data loader is:", len(train_dataloader))
 print("Length of valid data loader is:", len(valid_dataloader))
 
 # load the model
-model = BiDAF(word_vectors=word_embedding_matrix,
+model = Seq2Seq(word_vectors=word_embedding_matrix,
               char_vectors=char_embedding_matrix,
               hidden_size=hyper_params["hidden_size"],
               output_dim=len(idx2word),
               device=device)
+
 if hyper_params["pretrained"]:
     model.load_state_dict(torch.load(os.path.join(experiment_path, "model.pkl"))["state_dict"])
 model.to(device)
@@ -142,12 +143,24 @@ for epoch in range(hyper_params["num_epochs"]):
                                                                              batch[4].long().to(device),\
                                                                              batch[5].long().to(device)
         optimizer.zero_grad()
-        pred = model(w_sentence, c_sentence, w_answer, c_answer, w_question)
+        pred = model(w_sentence, c_sentence, w_question)
 
-        pred = pred.view(-1, pred.size(-1))
-        w_question = w_question.view(-1)
+        if (i + 1) % 1 == 0:
+            _, p = pred.max(2)
+            sent = p[0].cpu().numpy().tolist()[1:]
+            sent = [idx2word[i] for i in sent if idx2word[i]]
+            sent = sent[1:]
+            print("P:", sent)
+            print("T:", [idx2word[i] for i in w_question[0].cpu().numpy().tolist() if idx2word[i] != "--NULL--"], "\n")
+
+        pred = pred[:, 1:, :].contiguous().view(-1, pred[:, 1:, :].size(-1))
+        w_question = w_question[:, 1:].contiguous().view(-1)
 
         loss = criterion(pred, w_question)
+
+        if (i + 1) % 1 == 0:
+            print("loss:", loss.item())
+
         train_losses += loss.item()
 
         loss.backward()
@@ -174,8 +187,8 @@ for epoch in range(hyper_params["num_epochs"]):
 
             pred = model(w_sentence, c_sentence, w_answer, c_answer, w_question)
 
-            pred = pred.view(-1, pred.size(-1))
-            w_question = w_question.view(-1)
+            pred = pred[:, 1:, :].contiguous().view(-1, pred[:, 1:, :].size(-1))
+            w_question = w_question[:, 1:].contiguous().view(-1)
 
             loss = criterion(pred, w_question)
             valid_losses += loss.item()
