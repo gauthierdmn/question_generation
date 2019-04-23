@@ -24,13 +24,13 @@ class Seq2Seq(nn.Module):
         self.dec = layers.AttnDecoder(input_size=hidden_size,
                                       output_dim=output_dim,
                                       word_vectors=word_vectors,
-                                      hidden_size=hidden_size,
+                                      hidden_size=2 * hidden_size,
                                       n_layers=1,
                                       dropout=drop_prob)
 
         self.device = device
 
-    def forward(self, sw_idxs, sc_idxs, qw_idxs, teacher_forcing_ratio=1.):
+    def forward(self, sw_idxs, sc_idxs, qw_idxs, teacher_forcing_ratio=0.5):
         batch_size = sw_idxs.size(0)
         max_len = qw_idxs.size(1)
 
@@ -44,15 +44,13 @@ class Seq2Seq(nn.Module):
 
         s_enc, (hidden, cell) = self.enc(s_emb, s_len)  # (batch_size, s_len, 2 * hidden_size)
 
-        # we add the forward and backward hiddens and cells of the top LSTM layer to use for the decoder
-        enc_hidden = torch.add(hidden[-1], hidden[-2]).unsqueeze(0)
-        hidden = torch.add(hidden[-1], hidden[-2]).unsqueeze(0)
-        cell = torch.add(cell[-1], cell[-2]).unsqueeze(0)
+        hidden = torch.cat((hidden[-1], hidden[-2]), dim=1).unsqueeze(0)
+        cell = torch.cat((cell[-1], cell[-2]), dim=1).unsqueeze(0)
 
         dec_input = qw_idxs[:, 0]
 
         for t in range(1, max_len):
-            output, hidden, cell = self.dec(dec_input, enc_hidden, hidden, cell)  # output, hidden, cell
+            output, hidden, cell = self.dec(dec_input, s_enc, hidden, cell)
             outputs[:, t, :] = output
             teacher_force = random.random() < teacher_forcing_ratio
             top1 = output.max(1)[1]  # (batch_size)

@@ -144,7 +144,7 @@ class SquadPreprocessor:
         answer = [[w for w in word_tokenize(clean_text(doc.strip('\n')))] for doc in answer]
 
         # download vocabulary if not done yet
-        if None: #directory == "train":
+        if directory == "train":
             word_vocab, word2idx, char_vocab, char2idx = build_vocab(directory + ".sentence", directory + ".question",
                                                                      "word_vocab.pkl", "word2idx.pkl", "char_vocab.pkl",
                                                                      "char2idx.pkl", is_train=is_train,
@@ -247,7 +247,7 @@ if __name__ == "__main__":
     maybe_download_squad(url, dev_filename, config.data_dir)
 
     p = SquadPreprocessor(config.data_dir, train_filename, dev_filename, tokenizer)
-    #p.preprocess()
+    p.preprocess()
 
     p.extract_features(max_len_sentence=config.max_len_sentence,
                        max_len_word=config.max_len_word, is_train=True)

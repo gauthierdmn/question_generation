@@ -280,8 +280,7 @@ class Attn(torch.nn.Module):
         return torch.sum(hidden * energy, dim=2)
 
     def concat_score(self, hidden, encoder_output):
-        hidden = hidden.permute(1, 0, 2)
-        energy = self.attn(torch.cat((hidden.expand(encoder_output.size(0), -1, -1), encoder_output), 2)).tanh()
+        energy = self.attn(torch.cat((hidden.expand(-1, encoder_output.size(1), -1), encoder_output), 2)).tanh()
         return torch.sum(self.v * energy, dim=2)
 
     def forward(self, hidden, encoder_outputs):
@@ -292,9 +291,6 @@ class Attn(torch.nn.Module):
             attn_energies = self.concat_score(hidden, encoder_outputs)
         elif self.method == 'dot':
             attn_energies = self.dot_score(hidden, encoder_outputs)
-
-        # Transpose max_length and batch_size dimensions
-        attn_energies = attn_energies.t()
 
         # Return the softmax normalized probability scores (with added dimension)
         return F.softmax(attn_energies, dim=1).unsqueeze(1)
@@ -320,7 +316,7 @@ class AttnDecoder(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, input, enc_hidden, hidden, cell):
+    def forward(self, input, enc_outputs, hidden, cell):
         # input = [batch size]
         # hidden = [n layers * n directions, batch size, hid dim]
         # cell = [n layers * n directions, batch size, hid dim]
@@ -337,9 +333,9 @@ class AttnDecoder(nn.Module):
         rnn_output, (hidden, cell) = self.rnn(embedded, (hidden, cell))
 
         # Calculate attention weights from the current GRU output
-        attn_weights = self.attn(rnn_output, enc_hidden)
+        attn_weights = self.attn(rnn_output, enc_outputs)
         # Multiply attention weights to encoder outputs to get new "weighted sum" context vector
-        context = attn_weights.bmm(enc_hidden.transpose(0, 1))
+        context = attn_weights.bmm(enc_outputs)
         # Concatenate weighted context vector and GRU output using Luong eq. 5
         rnn_output = rnn_output.squeeze(0)
         context = context.squeeze(1)
