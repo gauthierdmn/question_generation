@@ -202,10 +202,11 @@ def concatenate_data(filenames, out_filename):
                 for line in infile:
                     outfile.write(line)
     with open(out_filename, "r") as f:
-        lines = [(random.random(), line) for line in f]
-    lines.sort()
+        lines = f.readlines()
+    random.seed(4)
+    random.shuffle(lines)
     with open(out_filename, "w") as f:
-        for _, line in lines:
+        for line in lines:
             f.write(line)
 
 
@@ -225,16 +226,16 @@ if __name__ == "__main__":
 
     concatenate_data([os.path.join(config.squad_data_dir, "train", "train.sentence"),
                       os.path.join(config.newsqa_data_dir, "train", "train.sentence")],
-                      os.path.join(config.out_dir, "train", "train.sentence"))
+                      os.path.join(config.out_dir, "src-train.txt"))
 
     concatenate_data([os.path.join(config.squad_data_dir, "train", "train.question"),
                       os.path.join(config.newsqa_data_dir, "train", "train.question")],
-                      os.path.join(config.out_dir, "train", "train.question"))
+                      os.path.join(config.out_dir, "tgt-train.txt"))
 
     concatenate_data([os.path.join(config.squad_data_dir, "dev", "dev.sentence"),
                       os.path.join(config.newsqa_data_dir, "dev", "dev.sentence")],
-                      os.path.join(config.out_dir, "dev", "dev.sentence"))
+                      os.path.join(config.out_dir, "src-val.txt"))
 
     concatenate_data([os.path.join(config.squad_data_dir, "dev", "dev.question"),
                       os.path.join(config.newsqa_data_dir, "dev", "dev.question")],
-                      os.path.join(config.out_dir, "dev", "dev.question"))
+                      os.path.join(config.out_dir, "tgt-val.txt"))
