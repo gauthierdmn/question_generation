@@ -66,7 +66,8 @@ class SquadPreprocessor:
         if not os.path.exists(os.path.join(self.data_dir, sub_dir)):
             os.makedirs(os.path.join(self.data_dir, sub_dir))
 
-        with open(os.path.join(self.data_dir, sub_dir, sub_dir + '.sentence'), 'w', encoding="utf-8") as sentence_file,\
+        with open(os.path.join(self.data_dir, sub_dir, sub_dir + '.context'), 'w', encoding="utf-8") as context_file,\
+             open(os.path.join(self.data_dir, sub_dir, sub_dir + '.sentence'), 'w', encoding="utf-8") as sentence_file,\
              open(os.path.join(self.data_dir, sub_dir, sub_dir + '.question'), 'w', encoding="utf-8") as question_file,\
              open(os.path.join(self.data_dir, sub_dir, sub_dir + '.answer'), 'w', encoding="utf-8") as answer_file:
 
@@ -81,11 +82,10 @@ class SquadPreprocessor:
                     context_sentences = sent_tokenize(context)
                     spans = convert_idx(context, context_tokens)
                     num_tokens = 0
-                    sent_starts = []
+                    first_token_sentence = []
                     for sentence in context_sentences:
-                        first_sentence_span = spans[num_tokens][0]
+                        first_token_sentence.append(num_tokens)
                         num_tokens += len(sentence)
-                        sent_starts.append(first_sentence_span)
                     qas = paragraph['qas']
                     # loop over Q/A
                     for qa in qas:
@@ -103,10 +103,22 @@ class SquadPreprocessor:
                                 answer = clean_text(answer)
                                 answer_tokens = word_tokenize(answer)
                                 answer_start = qa['answers'][answer_id]['answer_start']
+                                answer_stop = answer_start + len(answer)
+
+                                # Getting spans of the answer in the context
+                                answer_span = []
+                                for idx, span in enumerate(spans):
+                                    if not (answer_stop <= span[0] or answer_start >= span[1]):
+                                        answer_span.append(idx)
+                                if not answer_span:
+                                    continue
+
+                                # Getting the sentence where we have the answer
                                 sentence_tokens = []
-                                for idx, start in enumerate(sent_starts):
-                                    if answer_start >= start:
+                                for idx, start in enumerate(first_token_sentence):
+                                    if answer_span[0] >= start:
                                         sentence_tokens = context_sentences[idx]
+                                        answer_sentence_span = [span - start for span in answer_span]
                                     else:
                                         break
                                 if not sentence_tokens:
@@ -114,9 +126,10 @@ class SquadPreprocessor:
                                     raise Exception()
 
                             # write to file
-                            sentence_file.write(' '.join([token for token in sentence_tokens]) + '\n')
-                            question_file.write(' '.join([token for token in question_tokens]) + '\n')
-                            answer_file.write(' '.join([token for token in answer_tokens]) + '\n')
+                            context_file.write(" ".join([token + "|" + "1" if idx in answer_span else token + "|" + "0" for idx, token in enumerate(context_tokens)]) + "\n")
+                            sentence_file.write(" ".join([token + "|" + "1" if idx in answer_sentence_span else token + "|" + "0" for idx, token in enumerate(sentence_tokens)]) + "\n")
+                            question_file.write(" ".join([token for token in question_tokens]) + "\n")
+                            answer_file.write(" ".join([token for token in answer_tokens]) + "\n")
 
     def preprocess(self):
         self.split_data(self.train_filename)
@@ -130,7 +143,7 @@ class NewsQAPreprocessor:
         self.data = None
         self.tokenizer = tokenizer
 
-    def load_data(self, filename="combined-newsqa-data-v1"):
+    def load_data(self, filename="combined-newsqa-data-v1.json"):
         filepath = os.path.join(self.data_dir, filename)
         with open(filepath) as f:
             self.data = json.load(f)
@@ -144,7 +157,8 @@ class NewsQAPreprocessor:
             if not os.path.exists(os.path.join(self.data_dir, sub_dir)):
                 os.makedirs(os.path.join(self.data_dir, sub_dir))
 
-            with open(os.path.join(self.data_dir, sub_dir, sub_dir + ".sentence"), "w", encoding="utf-8") as sentence_file,\
+            with open(os.path.join(self.data_dir, sub_dir, sub_dir + ".context"), "w", encoding="utf-8") as context_file,\
+                 open(os.path.join(self.data_dir, sub_dir, sub_dir + ".sentence"), "w", encoding="utf-8") as sentence_file,\
                  open(os.path.join(self.data_dir, sub_dir, sub_dir + ".question"), "w", encoding="utf-8") as question_file,\
                  open(os.path.join(self.data_dir, sub_dir, sub_dir + ".answer"), "w", encoding="utf-8") as answer_file:
 
@@ -160,33 +174,63 @@ class NewsQAPreprocessor:
 
                             spans = convert_idx(context, context_tokens)
                             num_tokens = 0
-                            sent_starts = []
+                            first_token_sentence = []
                             for sentence in context_sentences:
-                                first_sentence_span = spans[num_tokens][0]
+                                first_token_sentence.append(num_tokens)
                                 num_tokens += len(sentence)
-                                sent_starts.append(first_sentence_span)
 
                             q = question["q"].strip()
                             if q[-1] != "?":
                                 continue
                             answer_start = question["consensus"]["s"]
                             answer = context[question["consensus"]["s"]: question["consensus"]["e"]].strip(".| ").strip("\n")
+                            answer_stop = answer_start + len(answer)
 
-                            for idx, start in enumerate(sent_starts):
-                                if answer_start >= start:
+                            # Getting spans of the answer in the context
+                            answer_span = []
+                            for idx, span in enumerate(spans):
+                                if not (answer_stop <= span[0] or answer_start >= span[1]):
+                                    answer_span.append(idx)
+                            if not answer_span:
+                                continue
+
+                            # Getting the sentence where we have the answer
+                            sentence_tokens = []
+                            for idx, start in enumerate(first_token_sentence):
+                                if answer_span[0] >= start:
                                     sentence_tokens = context_sentences[idx]
+                                    answer_sentence_span = [span - start for span in answer_span]
                                 else:
                                     break
-                            if not sentence_tokens:
-                                print("Sentence cannot be found")
-                                raise Exception()
 
-                            sent = " ".join([token.strip("\n").strip() for token in sentence_tokens if token.strip("\n").strip()])
-                            index = sent.find("( CNN ) -- ")
+                            sent = []
+                            for idx, token in enumerate(sentence_tokens):
+                                if token.strip("\n").strip():
+                                    if idx in answer_sentence_span:
+                                        sent.append(token + "|" + "1")
+                                    else:
+                                        sent.append(token + "|" + "0")
+                            sent = " ".join(sent)
+                            sent = sent.strip()
+                            index = sent.find("(|0 CNN|0 )|0 --|0 ")
                             if index > -1:
-                                sent = sent[index + len("( CNN ) -- "):]
+                                sent = sent[index + len("(|0 CNN|0 )|0 --|0 "):]
+
+                            ctxt = []
+                            for idx, token in enumerate(context_tokens):
+                                if token.strip("\n").strip():
+                                    if idx in answer_span:
+                                        ctxt.append(token + "|" + "1")
+                                    else:
+                                        ctxt.append(token + "|" + "0")
+                            ctxt = " ".join(ctxt)
+                            ctxt = ctxt.strip()
+                            index = ctxt.find("(|0 CNN|0 )|0 --|0 ")
+                            if index > -1:
+                                ctxt = ctxt[index + len("(|0 CNN|0 )|0 --|0 "):]
 
                             # write to file
+                            context_file.write(ctxt + "\n")
                             sentence_file.write(sent + "\n")
                             question_file.write(q + "\n")
                             answer_file.write(answer + "\n")
