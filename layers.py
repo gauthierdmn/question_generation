@@ -1,101 +1,13 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
-from utils import masked_softmax
 import config
 
 
-class DecEmbedding(nn.Module):
-    """Embedding layer used by BiDAF, with Words and Characters.
-    Args:
-        word_vectors (torch.Tensor): Pre-trained word vectors.
-        char_vectors (torch.Tensor): Randomly initialized char vectors
-        hidden_size (int): Size of hidden activations.
-        drop_prob (float): Probability of zero-ing out activations
-    """
-    def __init__(self, word_vectors, hidden_size, drop_prob):
-        super(DecEmbedding, self).__init__()
-        self.drop_prob = drop_prob
-        self.w_embed = nn.Embedding.from_pretrained(word_vectors, freeze=True)
-        self.proj = nn.Linear(word_vectors.size(1), hidden_size, bias=False)
-
-    def forward(self, x):
-
-        w_emb = self.w_embed(x)   # (batch_size, seq_len, embed_size)
-        w_emb = F.dropout(w_emb, self.drop_prob, self.training)
-        w_emb = self.proj(w_emb)  # (batch_size, seq_len, hidden_size)
-
-        return w_emb
-
-
-class Embedding(nn.Module):
-    """Embedding layer used by BiDAF, with Words and Characters.
-    Args:
-        word_vectors (torch.Tensor): Pre-trained word vectors.
-        char_vectors (torch.Tensor): Randomly initialized char vectors
-        hidden_size (int): Size of hidden activations.
-        drop_prob (float): Probability of zero-ing out activations
-    """
-    def __init__(self, word_vectors, char_vectors, hidden_size, drop_prob):
-        super(Embedding, self).__init__()
-        self.drop_prob = drop_prob
-        self.w_embed = nn.Embedding.from_pretrained(word_vectors, freeze=True)
-        self.c_embed = nn.Embedding.from_pretrained(char_vectors, freeze=False)
-        self.proj = nn.Linear(word_vectors.size(1), hidden_size, bias=False)
-        self.char_conv = nn.Conv2d(1, config.char_channel_size, (config.char_embedding_size, config.char_channel_width))
-        self.hwy = HighwayEncoder(2, hidden_size * 2)
-
-    def forward(self, x, y):
-        batch_size = x.size(0)
-
-        w_emb = self.w_embed(x)   # (batch_size, seq_len, embed_size)
-        w_emb = F.dropout(w_emb, self.drop_prob, self.training)
-        w_emb = self.proj(w_emb)  # (batch_size, seq_len, hidden_size)
-
-        c_emb = self.c_embed(y)
-        c_emb = F.dropout(c_emb, self.drop_prob, self.training)
-        c_emb = c_emb.view(-1, config.char_embedding_size, c_emb.size(2)).unsqueeze(1)
-        c_emb = self.char_conv(c_emb).squeeze()
-        c_emb = F.max_pool1d(c_emb, c_emb.size(2)).squeeze()
-        c_emb = c_emb.view(batch_size, -1, config.char_channel_size)
-
-        emb = torch.cat([w_emb, c_emb], dim=-1)
-
-        emb = self.hwy(emb)   # (batch_size, seq_len, hidden_size)
-
-        return emb
-
-
-class HighwayEncoder(nn.Module):
-    """Encode an input sequence using a highway network.
-    Based on the paper:
-    "Highway Networks"
-    by Rupesh Kumar Srivastava, Klaus Greff, Jürgen Schmidhuber
-    (https://arxiv.org/abs/1505.00387).
-    Args:
-        num_layers (int): Number of layers in the highway encoder.
-        hidden_size (int): Size of hidden activations.
-    """
-    def __init__(self, num_layers, hidden_size):
-        super(HighwayEncoder, self).__init__()
-        self.transforms = nn.ModuleList([nn.Linear(hidden_size, hidden_size)
-                                         for _ in range(num_layers)])
-        self.gates = nn.ModuleList([nn.Linear(hidden_size, hidden_size)
-                                    for _ in range(num_layers)])
-
-    def forward(self, x):
-        for gate, transform in zip(self.gates, self.transforms):
-            # Shapes of g, t, and x are all (batch_size, seq_len, hidden_size)
-            g = torch.sigmoid(gate(x))
-            t = F.relu(transform(x))
-            x = g * t + (1 - g) * x
-
-        return x
-
-
-class RNNEncoder(nn.Module):
+class Encoder(nn.Module):
     """General-purpose layer for encoding a sequence using a bidirectional RNN.
     Encoded output is the RNN's hidden state at each position, which
     has shape `(batch_size, seq_len, hidden_size * 2)`.
@@ -109,15 +21,24 @@ class RNNEncoder(nn.Module):
                  input_size,
                  hidden_size,
                  num_layers,
+                 word_vectors,
+                 bidirectional,
                  drop_prob=0.):
-        super(RNNEncoder, self).__init__()
+        super(Encoder, self).__init__()
+
+        num_directions = 2 if bidirectional else 1
+        assert hidden_size % num_directions == 0
+        hidden_size = hidden_size // num_directions
+
+        self.embedding = nn.Embedding.from_pretrained(word_vectors, freeze=True)
         self.drop_prob = drop_prob
         self.rnn = nn.LSTM(input_size, hidden_size, num_layers,
                            batch_first=True,
-                           bidirectional=True,
+                           bidirectional=bidirectional,
                            dropout=drop_prob if num_layers > 1 else 0.)
 
     def forward(self, x, lengths):
+        x = self.embedding(x)
         # Save original padded length for use by pad_packed_sequence
         orig_len = x.size(1)
 
@@ -143,211 +64,103 @@ class RNNEncoder(nn.Module):
         return x, (hidden, cell)
 
 
-class BiDAFAttention(nn.Module):
-    """Bidirectional attention originally used by BiDAF.
-    Bidirectional attention computes attention in two directions:
-    The context attends to the query and the query attends to the context.
-    The output of this layer is the concatenation of [context, c2q_attention,
-    context * c2q_attention, context * q2c_attention]. This concatenation allows
-    the attention vector at each timestep, along with the embeddings from
-    previous layers, to flow through the attention layer to the modeling layer.
-    The output has shape (batch_size, context_len, 8 * hidden_size).
-    Args:
-        hidden_size (int): Size of hidden activations.
-        drop_prob (float): Probability of zero-ing out activations.
-    """
-    def __init__(self, hidden_size, drop_prob=0.1):
-        super(BiDAFAttention, self).__init__()
-        self.drop_prob = drop_prob
-        self.c_weight = nn.Parameter(torch.zeros(hidden_size, 1))
-        self.q_weight = nn.Parameter(torch.zeros(hidden_size, 1))
-        self.cq_weight = nn.Parameter(torch.zeros(1, 1, hidden_size))
-        for weight in (self.c_weight, self.q_weight, self.cq_weight):
-            nn.init.xavier_uniform_(weight)
-        self.bias = nn.Parameter(torch.zeros(1))
-
-    def forward(self, c, q, c_mask, q_mask):
-        batch_size, c_len, _ = c.size()
-        q_len = q.size(1)
-        s = self.get_similarity_matrix(c, q)        # (batch_size, c_len, q_len)
-        c_mask = c_mask.view(batch_size, c_len, 1)  # (batch_size, c_len, 1)
-        q_mask = q_mask.view(batch_size, 1, q_len)  # (batch_size, 1, q_len)
-        s1 = masked_softmax(s, q_mask, dim=2)       # (batch_size, c_len, q_len)
-        s2 = masked_softmax(s, c_mask, dim=1)       # (batch_size, c_len, q_len)
-
-        # (bs, c_len, q_len) x (bs, q_len, hid_size) => (bs, c_len, hid_size)
-        a = torch.bmm(s1, q)
-        # (bs, c_len, c_len) x (bs, c_len, hid_size) => (bs, c_len, hid_size)
-        b = torch.bmm(torch.bmm(s1, s2.transpose(1, 2)), c)
-        x = torch.cat([c, a, c * a, c * b], dim=2)  # (bs, c_len, 4 * hid_size)
-
-        return x
-
-    def get_similarity_matrix(self, c, q):
-        """Get the "similarity matrix" between context and query (using the
-        terminology of the BiDAF paper).
-        A naive implementation as described in BiDAF would concatenate the
-        three vectors then project the result with a single weight matrix. This
-        method is a more memory-efficient implementation of the same operation.
-        See Also:
-            Equation 1 in https://arxiv.org/abs/1611.01603
-        """
-        c_len, q_len = c.size(1), q.size(1)
-        c = F.dropout(c, self.drop_prob, self.training)  # (bs, c_len, hid_size)
-        q = F.dropout(q, self.drop_prob, self.training)  # (bs, q_len, hid_size)
-
-        # Shapes: (batch_size, c_len, q_len)
-        s0 = torch.matmul(c, self.c_weight).expand([-1, -1, q_len])
-        s1 = torch.matmul(q, self.q_weight).transpose(1, 2)\
-                                           .expand([-1, c_len, -1])
-        s2 = torch.matmul(c * self.cq_weight, q.transpose(1, 2))
-        s = s0 + s1 + s2 + self.bias
-
-        return s
-
-
 class Decoder(nn.Module):
-    def __init__(self, input_size, output_dim, word_vectors, hidden_size, n_layers, dropout):
+    def __init__(self, input_size, hidden_size, output_dim, word_vectors, n_layers, device, dropout, attention=None):
         super().__init__()
-
-        self.n_layers = n_layers
-        self.dropout = dropout
-
+        self.output_dim = output_dim
         self.embedding = nn.Embedding.from_pretrained(word_vectors, freeze=True)
-
         self.rnn = nn.LSTM(input_size, hidden_size, n_layers, batch_first=True, bidirectional=False, dropout=dropout)
-
-        self.out = nn.Linear(hidden_size, output_dim)
-
+        self.attn = Attn(method="general", hidden_size=hidden_size, device=device) if attention else None
+        self.concat = nn.Linear(hidden_size * 2, hidden_size)
+        self.gen = Generator(decoder_size=hidden_size, output_dim=output_dim)
         self.dropout = nn.Dropout(dropout)
+        self.device = device
 
-    def forward(self, input, enc_hidden, hidden, cell):
-        # input = [batch size]
-        # hidden = [n layers * n directions, batch size, hid dim]
-        # cell = [n layers * n directions, batch size, hid dim]
+    def forward(self, enc_out, enc_hidden, question=None):
+        batch_size = enc_out.size(0)
 
-        # n directions in the decoder will both always be 1, therefore:
-        # hidden = [n layers, batch size, hid dim]
-        # context = [n layers, batch size, hid dim]
+        # tensor to store decoder outputs
+        outputs = torch.zeros(batch_size, config.max_len_sentence, self.output_dim).to(self.device)
 
-        input = input.unsqueeze(1)   #  (batch size, 1)
+        if isinstance(enc_hidden, tuple):  # meaning we have a LSTM encoder
+            enc_hidden = tuple((torch.cat((hidden[-1], hidden[-2]), dim=1).unsqueeze(0) for hidden in enc_hidden))
+        else:  # GRU layer
+            enc_hidden = torch.cat((enc_hidden[-1], enc_hidden[-2]), dim=1).unsqueeze(0)
 
-        embedded = self.dropout(self.embedding(input))   # (batch size, 1, emb dim)
+        enc_out = enc_out[:, -1, :].unsqueeze(1) if not self.attn else enc_out  # could use attention here
+        dec_hidden = enc_hidden
 
-        dec_input = torch.cat((embedded, enc_hidden.permute(1, 0, 2)), dim=2).float()
+        if question is not None:  # training with teacher
+            for t in range(0, config.max_len_sentence):
+                dec_input = question[:, t].unsqueeze(1)
+                embedded = self.dropout(self.embedding(dec_input))  # (batch size, 1, emb dim)
 
-        output, (hidden, cell) = self.rnn(dec_input, (hidden, cell))
+                # Calculate attention weights and apply to encoder outputs
+                attn_weights = self.attn(dec_hidden[-1], enc_out)
+                context = attn_weights.bmm(enc_out) # (B,1,V)
 
-        # output = [batch size, sent len, hid dim * n directions]
-        # hidden = [batch size, n layers * n directions, hid dim]
-        # cell = [batch size, n layers * n directions, hid dim]
+                dec_input = torch.cat((embedded, context), dim=2).float()
+                dec_output, dec_hidden = self.rnn(dec_input, dec_hidden)
+                dec_output = self.dropout(dec_output)
 
-        # sent len and n directions will always be 1 in the decoder, therefore:
-        # output = [batch size, 1, hid dim]
-        # hidden = [batch size, n layers, hid dim]
-        # cell = [batch size, n layers, hid dim]
+                outputs[:, t, :] = self.gen(dec_output)
+                #enc_out = dec_output
+        else:  # eval
+            raise NotImplementedError
 
-        prediction = self.out(output.squeeze(1))
-
-        # prediction = [batch size, output dim]
-
-        # Softmax of prediction?
-        softmax_fn = F.log_softmax # if log_softmax else F.softmax
-        probs = softmax_fn(prediction, dim=1)
-
-        return probs, hidden, cell
+        return outputs
 
 
-# Luong attention layer
-class Attn(torch.nn.Module):
-    def __init__(self, method, hidden_size):
+class Generator(nn.Module):
+    def __init__(self, decoder_size, output_dim):
+        super(Generator, self).__init__()
+        self.gen_func = nn.LogSoftmax(dim=-1)
+        self.generator = nn.Linear(decoder_size, output_dim)
+
+    def forward(self, x):
+        out = self.gen_func(self.generator(x)).squeeze(1)
+        return out
+
+
+class Attn(nn.Module):
+    def __init__(self, method, hidden_size, device):
         super(Attn, self).__init__()
         self.method = method
-        if self.method not in ['dot', 'general', 'concat']:
-            raise ValueError(self.method, "is not an appropriate attention method.")
         self.hidden_size = hidden_size
-        if self.method == 'general':
-            self.attn = torch.nn.Linear(self.hidden_size, hidden_size)
-        elif self.method == 'concat':
-            self.attn = torch.nn.Linear(self.hidden_size * 2, hidden_size)
-            self.v = torch.nn.Parameter(torch.FloatTensor(hidden_size))
+        self.attn = nn.Linear(self.hidden_size * 2, hidden_size)
+        self.v = nn.Parameter(torch.rand(hidden_size))
+        stdv = 1. / math.sqrt(self.v.size(0))
+        self.v.data.normal_(mean=0, std=stdv)
+        self.device = device
 
-    def dot_score(self, hidden, encoder_output):
-        return torch.sum(hidden * encoder_output, dim=2)
+    def forward(self, hidden, encoder_outputs, src_len=None):
+        '''
+        :param hidden:
+            previous hidden state of the decoder, in shape (layers*directions,B,H)
+        :param encoder_outputs:
+            encoder outputs from Encoder, in shape (T,B,H)
+        :param src_len:
+            used for masking. NoneType or tensor in shape (B) indicating sequence length
+        :return
+            attention energies in shape (B,T)
+        '''
+        max_len = encoder_outputs.size(1)
+        H = hidden.repeat(max_len, 1, 1).transpose(0, 1)
+        attn_energies = self.score(H, encoder_outputs)  # compute attention score
 
-    def general_score(self, hidden, encoder_output):
-        energy = self.attn(encoder_output)
-        return torch.sum(hidden * energy, dim=2)
+        if src_len is not None:
+            mask = []
+            for b in range(src_len.size(0)):
+                mask.append([0] * src_len[b].item() + [1] * (encoder_outputs.size(1) - src_len[b].item()))
+            mask = torch.ByteTensor(mask).unsqueeze(1).to(self.device)  # [B,1,T]
+            attn_energies = attn_energies.masked_fill(mask, -1e18)
 
-    def concat_score(self, hidden, encoder_output):
-        energy = self.attn(torch.cat((hidden.expand(-1, encoder_output.size(1), -1), encoder_output), 2)).tanh()
-        return torch.sum(self.v * energy, dim=2)
+        return F.softmax(attn_energies, dim=1).unsqueeze(1)  # normalize with softmax
 
-    def forward(self, hidden, encoder_outputs):
-        # Calculate the attention weights (energies) based on the given method
-        if self.method == 'general':
-            attn_energies = self.general_score(hidden, encoder_outputs)
-        elif self.method == 'concat':
-            attn_energies = self.concat_score(hidden, encoder_outputs)
-        elif self.method == 'dot':
-            attn_energies = self.dot_score(hidden, encoder_outputs)
+    def score(self, hidden, encoder_outputs):
+        energy = torch.tanh(self.attn(torch.cat([hidden, encoder_outputs], 2)))  # [B*T*2H]->[B*T*H]
+        energy = energy.transpose(2, 1)  # [B*H*T]
+        v = self.v.repeat(encoder_outputs.data.shape[0], 1).unsqueeze(1)  # [B*1*H]
+        energy = torch.bmm(v, energy)  # [B*1*T]
 
-        # Return the softmax normalized probability scores (with added dimension)
-        return F.softmax(attn_energies, dim=1).unsqueeze(1)
-
-
-class AttnDecoder(nn.Module):
-    def __init__(self, input_size, output_dim, word_vectors, hidden_size, n_layers, dropout):
-        super(AttnDecoder, self).__init__()
-
-        self.n_layers = n_layers
-        self.dropout = dropout
-
-        self.embedding = nn.Embedding.from_pretrained(word_vectors, freeze=True)
-
-        self.rnn = nn.LSTM(input_size, hidden_size, n_layers, batch_first=True, bidirectional=False, dropout=dropout)
-
-        self.attn = Attn(method="concat",
-                         hidden_size=hidden_size)
-
-        self.concat = nn.Linear(hidden_size * 2, hidden_size)
-
-        self.out = nn.Linear(hidden_size, output_dim)
-
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, input, enc_outputs, hidden, cell):
-        # input = [batch size]
-        # hidden = [n layers * n directions, batch size, hid dim]
-        # cell = [n layers * n directions, batch size, hid dim]
-
-        # n directions in the decoder will both always be 1, therefore:
-        # hidden = [n layers, batch size, hid dim]
-        # context = [n layers, batch size, hid dim]
-
-        input = input.unsqueeze(1)  # (batch size, 1)
-
-        embedded = self.dropout(self.embedding(input))   # (batch size, 1, emb dim)
-
-        # Forward through unidirectional LSTM
-        rnn_output, (hidden, cell) = self.rnn(embedded, (hidden, cell))
-
-        # Calculate attention weights from the current GRU output
-        attn_weights = self.attn(rnn_output, enc_outputs)
-        # Multiply attention weights to encoder outputs to get new "weighted sum" context vector
-        context = attn_weights.bmm(enc_outputs)
-        # Concatenate weighted context vector and GRU output using Luong eq. 5
-        rnn_output = rnn_output.squeeze(0)
-        context = context.squeeze(1)
-        concat_input = torch.cat((rnn_output.squeeze(1), context), 1)
-        concat_output = torch.tanh(self.concat(concat_input))
-
-        prediction = self.out(concat_output.squeeze(1))
-
-        # prediction = [batch size, output dim]
-
-        # Softmax of prediction?
-        softmax_fn = F.log_softmax  # if log_softmax else F.softmax
-        probs = softmax_fn(prediction, dim=1)
-
-        return probs, hidden, cell
+        return energy.squeeze(1)  # [B*T]

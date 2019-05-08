@@ -1,18 +1,17 @@
 # external libraries
-import numpy as np
-import pickle
 import os
 import json
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+import numpy as np
+from torchtext import data
 from tensorboardX import SummaryWriter
 
 # internal utilities
 import config
-from model import BiDAF, Seq2Seq
-from data_loader import SquadDataset
-from utils import save_checkpoint, compute_batch_metrics
+from preprocessing import DataPreprocessor
+from model import Seq2Seq
+from utils import save_checkpoint
 
 # preprocessing values used for training
 prepro_params = {
@@ -54,70 +53,37 @@ with open(os.path.join(experiment_path, "config_{}.json".format(config.exp)), "w
 # start TensorboardX writer
 writer = SummaryWriter(experiment_path)
 
-# open features file and store them in individual variables (train + dev)
-train_features = np.load(os.path.join(config.train_dir, "train_features.npz"))
-t_w_sentence, t_c_sentence, t_w_question, t_c_question, t_w_answer, t_c_answer = train_features["sentence_idxs"],\
-                                                                                 train_features["sentence_char_idxs"],\
-                                                                                 train_features["question_idxs"],\
-                                                                                 train_features["question_char_idxs"],\
-                                                                                 train_features["answer_idxs"],\
-                                                                                 train_features["answer_char_idxs"]
+dp = DataPreprocessor()
+train_dataset, eval_dataset, vocabs = dp.load_data(os.path.join(config.out_dir, "train-dataset.pt"),
+                                                   os.path.join(config.out_dir, "dev-dataset.pt"),
+                                                   config.glove)
 
-dev_features = np.load(os.path.join(config.dev_dir, "dev_features.npz"))
-d_w_context, d_c_context, d_w_question, d_c_question, d_w_answer, d_c_answer = dev_features["sentence_idxs"],\
-                                                                               dev_features["sentence_char_idxs"],\
-                                                                               dev_features["question_idxs"],\
-                                                                               dev_features["question_char_idxs"],\
-                                                                               dev_features["answer_idxs"],\
-                                                                               dev_features["answer_char_idxs"]
+train_dataloader = data.BucketIterator(train_dataset,
+                                       batch_size=hyper_params["batch_size"],
+                                       sort_key=lambda x: len(x.sentence),
+                                       shuffle=True)
 
-# load the embedding matrix created for our word vocabulary
-with open(os.path.join(config.train_dir, "word_embeddings.pkl"), "rb") as e:
-    word_embedding_matrix = pickle.load(e)
-with open(os.path.join(config.train_dir, "char_embeddings.pkl"), "rb") as e:
-    char_embedding_matrix = pickle.load(e)
-
-# load mapping between words and idxs
-with open(os.path.join(config.train_dir, "word2idx.pkl"), "rb") as f:
-    word2idx = pickle.load(f)
-
-idx2word = dict([(y, x) for x, y in word2idx.items()])
-
-# transform them into Tensors
-word_embedding_matrix = torch.from_numpy(np.array(word_embedding_matrix)).type(torch.float32)
-char_embedding_matrix = torch.from_numpy(np.array(char_embedding_matrix)).type(torch.float32)
-
-# load datasets
-train_dataset = SquadDataset(t_w_sentence, t_c_sentence, t_w_question, t_c_question, t_w_answer, t_c_answer)
-valid_dataset = SquadDataset(d_w_context, d_c_context, d_w_question, d_c_question, d_w_answer, d_c_answer)
-
-# load data generators
-train_dataloader = DataLoader(train_dataset,
-                              shuffle=True,
-                              batch_size=hyper_params["batch_size"],
-                              num_workers=4)
-
-valid_dataloader = DataLoader(valid_dataset,
-                              shuffle=True,
-                              batch_size=hyper_params["batch_size"],
-                              num_workers=4)
+eval_dataloader = data.BucketIterator(eval_dataset,
+                                      batch_size=hyper_params["batch_size"],
+                                      sort_key=lambda x: len(x.sentence),
+                                      shuffle=True)
 
 print("Length of training data loader is:", len(train_dataloader))
-print("Length of valid data loader is:", len(valid_dataloader))
+print("Length of valid data loader is:", len(eval_dataloader))
 
 # load the model
-model = Seq2Seq(word_vectors=word_embedding_matrix,
-              char_vectors=char_embedding_matrix,
-              hidden_size=hyper_params["hidden_size"],
-              output_dim=len(idx2word),
-              device=device)
+model = Seq2Seq(in_vocab=vocabs["src_vocab"],
+                hidden_size=hyper_params["hidden_size"],
+                output_dim=len(vocabs["trg_vocab"].itos),
+                device=device)
 
 if hyper_params["pretrained"]:
     model.load_state_dict(torch.load(os.path.join(experiment_path, "model.pkl"))["state_dict"])
 model.to(device)
 
 # define loss and optimizer
-criterion = nn.CrossEntropyLoss()
+padding_idx = vocabs['trg_vocab'].stoi["<PAD>"]
+criterion = nn.NLLLoss(ignore_index=padding_idx)  # , reduction="sum")
 optimizer = torch.optim.Adadelta(model.parameters(), hyper_params["learning_rate"], weight_decay=1e-4)
 
 # best loss so far
@@ -136,29 +102,22 @@ for epoch in range(hyper_params["num_epochs"]):
     model.train()
     train_losses = 0
     for i, batch in enumerate(train_dataloader):
-        w_sentence, c_sentence, w_question, c_question, w_answer, c_answer = batch[0].long().to(device),\
-                                                                             batch[1].long().to(device), \
-                                                                             batch[2].long().to(device), \
-                                                                             batch[3].long().to(device), \
-                                                                             batch[4].long().to(device),\
-                                                                             batch[5].long().to(device)
+        sentence, len_sentence, question = batch.src[0].to(device), batch.src[1].to(device), batch.trg[0].to(device)
         optimizer.zero_grad()
-        pred = model(w_sentence, c_sentence, w_question)
+        pred = model(sentence, len_sentence, question)
 
-        if (i + 1) % 1 == 0:
+        if (i + 1) % 500 == 0:
             _, p = pred.max(2)
             sent = p[0].cpu().numpy().tolist()[1:]
-            sent = [idx2word[i] for i in sent if idx2word[i]]
+            sent = [vocabs["trg_vocab"].itos[i] for i in sent if vocabs["trg_vocab"].itos[i]]
             sent = sent[1:]
             print("P:", sent)
-            print("T:", [idx2word[i] for i in w_question[0].cpu().numpy().tolist() if idx2word[i] != "--NULL--"], "\n")
+            print("T:", [vocabs["trg_vocab"].itos[i] for i in question[0].cpu().numpy().tolist() if vocabs["trg_vocab"].itos[i] != "<PAD>"])
 
-        pred = pred[:, 1:, :].contiguous().view(-1, pred[:, 1:, :].size(-1))
-        w_question = w_question[:, 1:].contiguous().view(-1)
+        pred = pred.view(-1, pred.size(2))
+        loss = criterion(pred, question.view(-1))
 
-        loss = criterion(pred, w_question)
-
-        if (i + 1) % 1 == 0:
+        if (i + 1) % 500 == 0:
             print("loss:", loss.item())
 
         train_losses += loss.item()
@@ -177,39 +136,33 @@ for epoch in range(hyper_params["num_epochs"]):
     valid_f1 = 0
     n_samples = 0
     with torch.no_grad():
-        for i, batch in enumerate(valid_dataloader):
-            w_sentence, c_sentence, w_question, c_question, w_answer, c_answer = batch[0].long().to(device), \
-                                                                                 batch[1].long().to(device), \
-                                                                                 batch[2].long().to(device), \
-                                                                                 batch[3].long().to(device), \
-                                                                                 batch[4].long().to(device), \
-                                                                                 batch[5].long().to(device)
+        for i, batch in enumerate(eval_dataloader):
+            sentence, len_sentence, question = batch.src[0].to(device), batch.src[1].to(device), batch.trg[0].to(device)
 
-            pred = model(w_sentence, c_sentence, w_answer, c_answer, w_question)
+            pred = model(sentence, len_sentence, question)
 
-            pred = pred[:, 1:, :].contiguous().view(-1, pred[:, 1:, :].size(-1))
-            w_question = w_question[:, 1:].contiguous().view(-1)
+            pred = pred.view(-1, pred.size(2))
 
-            loss = criterion(pred, w_question)
+            loss = criterion(pred, question.view(-1))
             valid_losses += loss.item()
 
-            n_samples += w_sentence.size(0)
+            n_samples += sentence.size(0)
 
-        writer.add_scalars("valid", {"loss": np.round(valid_losses / len(valid_dataloader), 2),
+        writer.add_scalars("valid", {"loss": np.round(valid_losses / len(eval_dataloader), 2),
                                      "epoch": epoch + 1})
         print("Valid loss of the model at epoch {} is: {}".format(epoch + 1, np.round(valid_losses /
-                                                                                      len(valid_dataloader), 2)))
+                                                                                      len(eval_dataloader), 2)))
 
     # save last model weights
     save_checkpoint({
         "epoch": epoch + 1 + epoch_checkpoint,
         "state_dict": model.state_dict(),
-        "best_valid_loss": np.round(valid_losses / len(valid_dataloader), 2)
+        "best_valid_loss": np.round(valid_losses / len(eval_dataloader), 2)
     }, True, os.path.join(experiment_path, "model_last_checkpoint.pkl"))
 
     # save model with best validation error
-    is_best = bool(np.round(valid_losses / len(valid_dataloader), 2) < best_valid_loss)
-    best_valid_loss = min(np.round(valid_losses / len(valid_dataloader), 2), best_valid_loss)
+    is_best = bool(np.round(valid_losses / len(eval_dataloader), 2) < best_valid_loss)
+    best_valid_loss = min(np.round(valid_losses / len(eval_dataloader), 2), best_valid_loss)
     save_checkpoint({
         "epoch": epoch + 1 + epoch_checkpoint,
         "state_dict": model.state_dict(),

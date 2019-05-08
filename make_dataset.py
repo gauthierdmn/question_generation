@@ -92,6 +92,8 @@ class SquadPreprocessor:
                         question = qa['question']
                         question = clean_text(question)
                         question_tokens = word_tokenize(question)
+                        if question_tokens[-1] != "?" or len(question_tokens) < 5 or len(question_tokens) > 20:
+                            continue
                         if sub_dir == "train":
                             # select only one ground truth, the top answer, if any answer
                             answer_ids = 1 if qa['answers'] else 0
@@ -126,10 +128,15 @@ class SquadPreprocessor:
                                     raise Exception()
 
                             # write to file
-                            context_file.write(" ".join([token + "|" + "1" if idx in answer_span else token + "|" + "0" for idx, token in enumerate(context_tokens)]) + "\n")
-                            sentence_file.write(" ".join([token + "|" + "1" if idx in answer_sentence_span else token + "|" + "0" for idx, token in enumerate(sentence_tokens)]) + "\n")
+                            context_file.write(" ".join(context_tokens) + "\n")
+                            sentence_file.write(" ".join(sentence_tokens) + "\n")
                             question_file.write(" ".join([token for token in question_tokens]) + "\n")
                             answer_file.write(" ".join([token for token in answer_tokens]) + "\n")
+
+                            #context_file.write(" ".join([token + "|" + "1" if idx in answer_span else token + "|" + "0" for idx, token in enumerate(context_tokens)]) + "\n")
+                            #sentence_file.write(" ".join([token + "|" + "1" if idx in answer_sentence_span else token + "|" + "0" for idx, token in enumerate(sentence_tokens)]) + "\n")
+                            #question_file.write(" ".join([token for token in question_tokens]) + "\n")
+                            #answer_file.write(" ".join([token for token in answer_tokens]) + "\n")
 
     def preprocess(self):
         self.split_data(self.train_filename)
@@ -180,7 +187,7 @@ class NewsQAPreprocessor:
                                 num_tokens += len(sentence)
 
                             q = question["q"].strip()
-                            if q[-1] != "?":
+                            if q[-1] != "?" or len(q.split()) < 5 or len(q.split()) > 20:
                                 continue
                             answer_start = question["consensus"]["s"]
                             answer = context[question["consensus"]["s"]: question["consensus"]["e"]].strip(".| ").strip("\n")
@@ -230,10 +237,15 @@ class NewsQAPreprocessor:
                                 ctxt = ctxt[index + len("(|0 CNN|0 )|0 --|0 "):]
 
                             # write to file
-                            context_file.write(ctxt + "\n")
-                            sentence_file.write(sent + "\n")
+                            context_file.write(" ".join([token for token in context_tokens if token.strip("\n").strip()]) + "\n")
+                            sentence_file.write(" ".join([token for token in sentence_tokens if token.strip("\n").strip()]) + "\n")
                             question_file.write(q + "\n")
                             answer_file.write(answer + "\n")
+
+                            #context_file.write(ctxt + "\n")
+                            #sentence_file.write(sent + "\n")
+                            #question_file.write(q + "\n")
+                            #answer_file.write(answer + "\n")
 
     def preprocess(self):
         self.split_data(self.filename)
@@ -270,16 +282,16 @@ if __name__ == "__main__":
 
     concatenate_data([os.path.join(config.squad_data_dir, "train", "train.sentence"),
                       os.path.join(config.newsqa_data_dir, "train", "train.sentence")],
-                      os.path.join(config.out_dir, "src-train.txt"))
+                      os.path.join(config.out_dir, "train.sentence"))
 
     concatenate_data([os.path.join(config.squad_data_dir, "train", "train.question"),
                       os.path.join(config.newsqa_data_dir, "train", "train.question")],
-                      os.path.join(config.out_dir, "tgt-train.txt"))
+                      os.path.join(config.out_dir, "train.question"))
 
     concatenate_data([os.path.join(config.squad_data_dir, "dev", "dev.sentence"),
                       os.path.join(config.newsqa_data_dir, "dev", "dev.sentence")],
-                      os.path.join(config.out_dir, "src-val.txt"))
+                      os.path.join(config.out_dir, "dev.sentence"))
 
     concatenate_data([os.path.join(config.squad_data_dir, "dev", "dev.question"),
                       os.path.join(config.newsqa_data_dir, "dev", "dev.question")],
-                      os.path.join(config.out_dir, "tgt-val.txt"))
+                      os.path.join(config.out_dir, "dev.question"))
