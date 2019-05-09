@@ -1,7 +1,7 @@
-import torch
-from torchtext import data, vocab
 import os
 from tqdm import tqdm
+import torch
+from torchtext import data, vocab
 
 from utils import word_tokenize
 import config
@@ -44,7 +44,7 @@ class DataPreprocessor(object):
     def __init__(self):
         self.src_field, self.trg_field = self.generate_fields()
 
-    def preprocess(self, train_path, val_path, glove_dir, train_file, val_file, src_lang, trg_lang, max_len=None):
+    def preprocess(self, train_path, val_path, train_file, val_file, src_lang, trg_lang, max_len=None):
         # Generating torchtext dataset class
         print("Preprocessing train dataset...")
         train_dataset = self.generate_data(train_path, src_lang, trg_lang, max_len)
@@ -59,8 +59,8 @@ class DataPreprocessor(object):
         self.save_data(val_file, val_dataset)
 
         # Building field vocabulary
-        self.src_field.build_vocab(train_dataset, max_size=10000)
-        self.trg_field.build_vocab(train_dataset, max_size=10000)
+        self.src_field.build_vocab(train_dataset, max_size=config.in_vocab_size)
+        self.trg_field.build_vocab(train_dataset, max_size=config.out_vocab_size)
 
         src_vocab, trg_vocab = self.generate_vocabs()
 
@@ -82,11 +82,11 @@ class DataPreprocessor(object):
         val_dataset = data.Dataset(fields=fields, examples=val_examples)
 
         # Loading GloVE vectors
-        vec = vocab.Vectors(os.path.join(glove_dir, "glove.6B.300d.txt"))
+        vec = vocab.Vectors(os.path.join(glove_dir, "glove.6B.{}d.txt".format(config.word_embedding_size)))
 
         # Building field vocabulary
-        self.src_field.build_vocab(train_dataset, vectors=vec, max_size=10000)
-        self.trg_field.build_vocab(train_dataset, vectors=vec, max_size=10000)
+        self.src_field.build_vocab(train_dataset, vectors=vec, max_size=config.in_vocab_size)
+        self.trg_field.build_vocab(train_dataset, vectors=vec, max_size=config.out_vocab_size)
 
         src_vocab, trg_vocab = self.generate_vocabs()
         vocabs = {'src_vocab': src_vocab, 'trg_vocab': trg_vocab}

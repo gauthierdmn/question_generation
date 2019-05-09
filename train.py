@@ -3,6 +3,7 @@ import os
 import json
 import torch
 import torch.nn as nn
+from torch.nn.utils import clip_grad_norm_
 import numpy as np
 from torchtext import data
 from tensorboardX import SummaryWriter
@@ -15,11 +16,8 @@ from utils import save_checkpoint
 
 # preprocessing values used for training
 prepro_params = {
-    "max_words": config.max_words,
     "word_embedding_size": config.word_embedding_size,
-    "char_embedding_size": config.char_embedding_size,
     "max_len_sentence": config.max_len_sentence,
-    "max_len_word": config.max_len_word
 }
 
 # hyper-parameters setup
@@ -28,8 +26,7 @@ hyper_params = {
     "batch_size": config.batch_size,
     "learning_rate": config.learning_rate,
     "hidden_size": config.hidden_size,
-    "char_channel_width": config.char_channel_width,
-    "char_channel_size": config.char_channel_size,
+    "n_layers": config.n_layers,
     "drop_prob": config.drop_prob,
     "cuda": config.cuda,
     "pretrained": config.pretrained
@@ -74,8 +71,10 @@ print("Length of valid data loader is:", len(eval_dataloader))
 # load the model
 model = Seq2Seq(in_vocab=vocabs["src_vocab"],
                 hidden_size=hyper_params["hidden_size"],
+                n_layers=hyper_params["n_layers"],
                 output_dim=len(vocabs["trg_vocab"].itos),
-                device=device)
+                device=device,
+                drop_prob=hyper_params["drop_prob"])
 
 if hyper_params["pretrained"]:
     model.load_state_dict(torch.load(os.path.join(experiment_path, "model.pkl"))["state_dict"])
@@ -83,8 +82,8 @@ model.to(device)
 
 # define loss and optimizer
 padding_idx = vocabs['trg_vocab'].stoi["<PAD>"]
-criterion = nn.NLLLoss(ignore_index=padding_idx)  # , reduction="sum")
-optimizer = torch.optim.Adadelta(model.parameters(), hyper_params["learning_rate"], weight_decay=1e-4)
+criterion = nn.NLLLoss(ignore_index=padding_idx, reduction="sum")
+optimizer = torch.optim.SGD(model.parameters(), hyper_params["learning_rate"], momentum=0.9, weight_decay=1e-4)
 
 # best loss so far
 if hyper_params["pretrained"]:
@@ -101,39 +100,42 @@ for epoch in range(hyper_params["num_epochs"]):
     print("##### epoch {:2d}".format(epoch + 1))
     model.train()
     train_losses = 0
+    n_correct = 0
+    n_samples = 0
     for i, batch in enumerate(train_dataloader):
         sentence, len_sentence, question = batch.src[0].to(device), batch.src[1].to(device), batch.trg[0].to(device)
         optimizer.zero_grad()
         pred = model(sentence, len_sentence, question)
-
-        if (i + 1) % 500 == 0:
-            _, p = pred.max(2)
-            sent = p[0].cpu().numpy().tolist()[1:]
-            sent = [vocabs["trg_vocab"].itos[i] for i in sent if vocabs["trg_vocab"].itos[i]]
-            sent = sent[1:]
-            print("P:", sent)
-            print("T:", [vocabs["trg_vocab"].itos[i] for i in question[0].cpu().numpy().tolist() if vocabs["trg_vocab"].itos[i] != "<PAD>"])
-
         pred = pred.view(-1, pred.size(2))
         loss = criterion(pred, question.view(-1))
 
         if (i + 1) % 500 == 0:
             print("loss:", loss.item())
 
+        pred = pred.max(1)[1]
+        non_padding = question.view(-1).ne(padding_idx)
+        num_correct = pred.eq(question.view(-1)).masked_select(non_padding).sum().item()
+        num_non_padding = non_padding.sum().item()
+
         train_losses += loss.item()
+        n_samples += num_non_padding
+        n_correct += num_correct
 
         loss.backward()
+        clip_grad_norm_(model.parameters(), 5.)
         optimizer.step()
 
-    writer.add_scalars("train", {"loss": np.round(train_losses / len(train_dataloader), 2),
+    writer.add_scalars("train", {"loss": np.round(train_losses / n_samples, 2),
+                                 "accuracy": np.round(100 * (n_correct / n_samples), 2),
                                  "epoch": epoch + 1})
     print("Train loss of the model at epoch {} is: {}".format(epoch + 1, np.round(train_losses /
-                                                                                  len(train_dataloader), 2)))
+                                                                                  n_samples, 2)))
+    print("Train accuracy of the model at epoch {} is: {}".format(epoch + 1,
+                                                                  np.round(100 * (n_correct / n_samples), 2)))
 
     model.eval()
     valid_losses = 0
-    valid_em = 0
-    valid_f1 = 0
+    n_correct = 0
     n_samples = 0
     with torch.no_grad():
         for i, batch in enumerate(eval_dataloader):
@@ -144,14 +146,23 @@ for epoch in range(hyper_params["num_epochs"]):
             pred = pred.view(-1, pred.size(2))
 
             loss = criterion(pred, question.view(-1))
+
+            pred = pred.max(1)[1]
+            non_padding = question.view(-1).ne(padding_idx)
+            num_correct = pred.eq(question.view(-1)).masked_select(non_padding).sum().item()
+            num_non_padding = non_padding.sum().item()
+
             valid_losses += loss.item()
+            n_samples += num_non_padding
+            n_correct += num_correct
 
-            n_samples += sentence.size(0)
-
-        writer.add_scalars("valid", {"loss": np.round(valid_losses / len(eval_dataloader), 2),
+        writer.add_scalars("valid", {"loss": np.round(valid_losses / n_samples, 2),
+                                     "accuracy": np.round(100 * (n_correct / n_samples), 2),
                                      "epoch": epoch + 1})
         print("Valid loss of the model at epoch {} is: {}".format(epoch + 1, np.round(valid_losses /
-                                                                                      len(eval_dataloader), 2)))
+                                                                                      n_samples, 2)))
+        print("Valid accuracy of the model at epoch {} is: {}".format(epoch + 1,
+                                                                      np.round(100 * (n_correct / n_samples), 2)))
 
     # save last model weights
     save_checkpoint({

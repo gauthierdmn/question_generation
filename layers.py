@@ -8,15 +8,6 @@ import config
 
 
 class Encoder(nn.Module):
-    """General-purpose layer for encoding a sequence using a bidirectional RNN.
-    Encoded output is the RNN's hidden state at each position, which
-    has shape `(batch_size, seq_len, hidden_size * 2)`.
-    Args:
-        input_size (int): Size of a single timestep in the input.
-        hidden_size (int): Size of the RNN hidden state.
-        num_layers (int): Number of layers of RNN cells to use.
-        drop_prob (float): Probability of zero-ing out activations.
-    """
     def __init__(self,
                  input_size,
                  hidden_size,
@@ -82,10 +73,11 @@ class Decoder(nn.Module):
         # tensor to store decoder outputs
         outputs = torch.zeros(batch_size, config.max_len_sentence, self.output_dim).to(self.device)
 
+        # TODO: we should have a "if bidirectional:" statement here, because does not work for unidirectional
         if isinstance(enc_hidden, tuple):  # meaning we have a LSTM encoder
-            enc_hidden = tuple((torch.cat((hidden[-1], hidden[-2]), dim=1).unsqueeze(0) for hidden in enc_hidden))
+            enc_hidden = tuple((torch.cat((hidden[0:hidden.size(0):2], hidden[1:hidden.size(0):2]), dim=2) for hidden in enc_hidden))
         else:  # GRU layer
-            enc_hidden = torch.cat((enc_hidden[-1], enc_hidden[-2]), dim=1).unsqueeze(0)
+            enc_hidden = torch.cat((enc_hidden[0:enc_hidden.size(0):2], enc_hidden[1:enc_hidden.size(0):2]), dim=2)
 
         enc_out = enc_out[:, -1, :].unsqueeze(1) if not self.attn else enc_out  # could use attention here
         dec_hidden = enc_hidden
@@ -96,11 +88,14 @@ class Decoder(nn.Module):
                 embedded = self.dropout(self.embedding(dec_input))  # (batch size, 1, emb dim)
 
                 # Calculate attention weights and apply to encoder outputs
-                attn_weights = self.attn(dec_hidden[-1], enc_out)
+                attn_weights = self.attn(dec_hidden[0][-1], enc_out)
                 context = attn_weights.bmm(enc_out) # (B,1,V)
 
                 dec_input = torch.cat((embedded, context), dim=2).float()
-                dec_output, dec_hidden = self.rnn(dec_input, dec_hidden)
+                if isinstance(self.rnn, nn.GRU):
+                    dec_output, dec_hidden = self.rnn(dec_input, dec_hidden[0])
+                else:
+                    dec_output, dec_hidden = self.rnn(dec_input, dec_hidden)
                 dec_output = self.dropout(dec_output)
 
                 outputs[:, t, :] = self.gen(dec_output)

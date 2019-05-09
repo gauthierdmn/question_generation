@@ -4,23 +4,23 @@ import layers
 
 
 class Seq2Seq(nn.Module):
-    def __init__(self, in_vocab, hidden_size, output_dim, device, drop_prob=0.):
+    def __init__(self, in_vocab, hidden_size, n_layers, output_dim, device, drop_prob=0.):
         super(Seq2Seq, self).__init__()
 
         self.enc = layers.Encoder(input_size=in_vocab.vectors.size(1),
                                   hidden_size=hidden_size,
-                                  num_layers=1,
+                                  num_layers=n_layers,
                                   word_vectors=in_vocab.vectors,
                                   bidirectional=True,
-                                  drop_prob=drop_prob)
+                                  drop_prob=drop_prob if n_layers > 1 else 0.)
 
-        self.dec = layers.Decoder(input_size=2 * hidden_size,
+        self.dec = layers.Decoder(input_size=in_vocab.vectors.size(1) + hidden_size,
                                   hidden_size=hidden_size,
                                   output_dim=output_dim,
                                   word_vectors=in_vocab.vectors,
-                                  n_layers=1,
+                                  n_layers=n_layers,
                                   device=device,
-                                  dropout=drop_prob,
+                                  dropout=drop_prob if n_layers > 1 else 0.,
                                   attention=True)
 
     def forward(self, sentence, sentence_len, question):
