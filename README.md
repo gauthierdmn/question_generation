@@ -6,8 +6,6 @@ More precisely, given a sequence of words S = *w1*, *w2*, ..., *wn*, the source 
 
 We can interpret this task as the reverse objective of Question Answering, where given a sentence and a question, we build an algorithm to find the answer.
 
-![Seq2Seq](seq2seq.png)
-
 # Model Architecture
 
 ![Seq2Seq](seq2seq.png)
