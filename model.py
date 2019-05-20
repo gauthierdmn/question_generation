@@ -4,7 +4,7 @@ import layers
 
 
 class Seq2Seq(nn.Module):
-    def __init__(self, in_vocab, hidden_size, n_layers, output_dim, device, drop_prob=0.):
+    def __init__(self, in_vocab, hidden_size, n_layers, trg_vocab, device, drop_prob=0.):
         super(Seq2Seq, self).__init__()
 
         self.enc = layers.Encoder(input_size=in_vocab.vectors.size(1),
@@ -16,8 +16,8 @@ class Seq2Seq(nn.Module):
 
         self.dec = layers.Decoder(input_size=in_vocab.vectors.size(1) + hidden_size,
                                   hidden_size=hidden_size,
-                                  output_dim=output_dim,
                                   word_vectors=in_vocab.vectors,
+                                  trg_vocab=trg_vocab,
                                   n_layers=n_layers,
                                   device=device,
                                   dropout=drop_prob if n_layers > 1 else 0.,

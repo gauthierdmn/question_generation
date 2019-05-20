@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
-import config
+from utils import sample_sequence
 
 
 class Encoder(nn.Module):
@@ -56,26 +56,35 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, input_size, hidden_size, output_dim, word_vectors, n_layers, device, dropout, attention=None):
+    def __init__(self, input_size, hidden_size, word_vectors, n_layers, trg_vocab, device, dropout, attention=None,
+                 min_len_sentence=5, max_len_sentence=50, top_k=0., top_p=0.9, temperature=0.7, greedy_decoding=False):
         super().__init__()
-        self.output_dim = output_dim
+        self.output_dim = len(trg_vocab.itos)
         self.embedding = nn.Embedding.from_pretrained(word_vectors, freeze=True)
         self.rnn = nn.LSTM(input_size, hidden_size, n_layers, batch_first=True, bidirectional=False, dropout=dropout)
         self.attn = Attn(method="general", hidden_size=hidden_size, device=device) if attention else None
         self.concat = nn.Linear(hidden_size * 2, hidden_size)
-        self.gen = Generator(decoder_size=hidden_size, output_dim=output_dim)
+        self.gen = Generator(decoder_size=hidden_size, output_dim=len(trg_vocab.itos))
         self.dropout = nn.Dropout(dropout)
+        self.min_len_sentence = min_len_sentence
+        self.max_len_sentence = max_len_sentence
+        self.top_k = top_k
+        self.top_p = top_p
+        self.temperature = temperature
+        self.greedy_decoding = greedy_decoding
+        self.special_tokens_ids = [trg_vocab.stoi[t] for t in ["<EOS>", "<PAD>"]]
         self.device = device
 
     def forward(self, enc_out, enc_hidden, question=None):
         batch_size = enc_out.size(0)
 
         # tensor to store decoder outputs
-        outputs = torch.zeros(batch_size, config.max_len_sentence, self.output_dim).to(self.device)
+        outputs = torch.zeros(batch_size, 50, self.output_dim).to(self.device) if question is not None else []
 
         # TODO: we should have a "if bidirectional:" statement here, because does not work for unidirectional
         if isinstance(enc_hidden, tuple):  # meaning we have a LSTM encoder
-            enc_hidden = tuple((torch.cat((hidden[0:hidden.size(0):2], hidden[1:hidden.size(0):2]), dim=2) for hidden in enc_hidden))
+            enc_hidden = tuple(
+                (torch.cat((hidden[0:hidden.size(0):2], hidden[1:hidden.size(0):2]), dim=2) for hidden in enc_hidden))
         else:  # GRU layer
             enc_hidden = torch.cat((enc_hidden[0:enc_hidden.size(0):2], enc_hidden[1:enc_hidden.size(0):2]), dim=2)
 
@@ -83,13 +92,13 @@ class Decoder(nn.Module):
         dec_hidden = enc_hidden
 
         if question is not None:  # training with teacher
-            for t in range(0, config.max_len_sentence):
+            for t in range(0, self.max_len_sentence):
                 dec_input = question[:, t].unsqueeze(1)
                 embedded = self.dropout(self.embedding(dec_input))  # (batch size, 1, emb dim)
 
                 # Calculate attention weights and apply to encoder outputs
                 attn_weights = self.attn(dec_hidden[0][-1], enc_out)
-                context = attn_weights.bmm(enc_out) # (B,1,V)
+                context = attn_weights.bmm(enc_out)  # (B,1,V)
 
                 dec_input = torch.cat((embedded, context), dim=2).float()
                 if isinstance(self.rnn, nn.GRU):
@@ -99,9 +108,33 @@ class Decoder(nn.Module):
                 dec_output = self.dropout(dec_output)
 
                 outputs[:, t, :] = self.gen(dec_output)
-                #enc_out = dec_output
+                # enc_out = dec_output
         else:  # eval
-            raise NotImplementedError
+            dec_input = torch.zeros(enc_out.size(0), 1).fill_(2).long().to(self.device)
+            for t in range(0, self.max_len_sentence):
+                embedded = self.dropout(self.embedding(dec_input))  # (batch size, 1, emb dim)
+
+                # Calculate attention weights and apply to encoder outputs
+                attn_weights = self.attn(dec_hidden[0][-1], enc_out)
+                context = attn_weights.bmm(enc_out)  # (B,1,V)
+
+                dec_input = torch.cat((embedded, context), dim=2).float()
+                if isinstance(self.rnn, nn.GRU):
+                    dec_output, dec_hidden = self.rnn(dec_input, dec_hidden[0])
+                else:
+                    dec_output, dec_hidden = self.rnn(dec_input, dec_hidden)
+                    dec_output = self.dropout(dec_output)
+                out = self.gen(dec_output)
+
+                out, probs = sample_sequence(out, self.top_k, self.top_p, self.temperature, self.greedy_decoding)
+                if t < self.min_len_sentence and out.item() in self.special_tokens_ids:
+                    while out.item() in self.special_tokens_ids:
+                        out = torch.multinomial(probs, num_samples=1)
+
+                if out.item() in self.special_tokens_ids:
+                    break
+                outputs.append(out.item())
+                dec_input = out.long().unsqueeze(1)
 
         return outputs
 

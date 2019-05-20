@@ -72,7 +72,7 @@ print("Length of valid data loader is:", len(eval_dataloader))
 model = Seq2Seq(in_vocab=vocabs["src_vocab"],
                 hidden_size=hyper_params["hidden_size"],
                 n_layers=hyper_params["n_layers"],
-                output_dim=len(vocabs["trg_vocab"].itos),
+                trg_vocab=vocabs['trg_vocab'],
                 device=device,
                 drop_prob=hyper_params["drop_prob"])
 
