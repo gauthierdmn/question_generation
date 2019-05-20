@@ -120,7 +120,6 @@ class SquadPreprocessor:
                                 for idx, start in enumerate(first_token_sentence):
                                     if answer_span[0] >= start:
                                         sentence_tokens = context_sentences[idx]
-                                        answer_sentence_span = [span - start for span in answer_span]
                                     else:
                                         break
                                 if not sentence_tokens:
@@ -132,11 +131,6 @@ class SquadPreprocessor:
                             sentence_file.write(" ".join(sentence_tokens) + "\n")
                             question_file.write(" ".join([token for token in question_tokens]) + "\n")
                             answer_file.write(" ".join([token for token in answer_tokens]) + "\n")
-
-                            #context_file.write(" ".join([token + "|" + "1" if idx in answer_span else token + "|" + "0" for idx, token in enumerate(context_tokens)]) + "\n")
-                            #sentence_file.write(" ".join([token + "|" + "1" if idx in answer_sentence_span else token + "|" + "0" for idx, token in enumerate(sentence_tokens)]) + "\n")
-                            #question_file.write(" ".join([token for token in question_tokens]) + "\n")
-                            #answer_file.write(" ".join([token for token in answer_tokens]) + "\n")
 
     def preprocess(self):
         self.split_data(self.train_filename)
@@ -206,35 +200,8 @@ class NewsQAPreprocessor:
                             for idx, start in enumerate(first_token_sentence):
                                 if answer_span[0] >= start:
                                     sentence_tokens = context_sentences[idx]
-                                    answer_sentence_span = [span - start for span in answer_span]
                                 else:
                                     break
-
-                            sent = []
-                            for idx, token in enumerate(sentence_tokens):
-                                if token.strip("\n").strip():
-                                    if idx in answer_sentence_span:
-                                        sent.append(token + "|" + "1")
-                                    else:
-                                        sent.append(token + "|" + "0")
-                            sent = " ".join(sent)
-                            sent = sent.strip()
-                            index = sent.find("(|0 CNN|0 )|0 --|0 ")
-                            if index > -1:
-                                sent = sent[index + len("(|0 CNN|0 )|0 --|0 "):]
-
-                            ctxt = []
-                            for idx, token in enumerate(context_tokens):
-                                if token.strip("\n").strip():
-                                    if idx in answer_span:
-                                        ctxt.append(token + "|" + "1")
-                                    else:
-                                        ctxt.append(token + "|" + "0")
-                            ctxt = " ".join(ctxt)
-                            ctxt = ctxt.strip()
-                            index = ctxt.find("(|0 CNN|0 )|0 --|0 ")
-                            if index > -1:
-                                ctxt = ctxt[index + len("(|0 CNN|0 )|0 --|0 "):]
 
                             # write to file
                             context_file.write(" ".join([token for token in context_tokens if token.strip("\n").strip()]) + "\n")
@@ -242,10 +209,6 @@ class NewsQAPreprocessor:
                             question_file.write(q + "\n")
                             answer_file.write(answer + "\n")
 
-                            #context_file.write(ctxt + "\n")
-                            #sentence_file.write(sent + "\n")
-                            #question_file.write(q + "\n")
-                            #answer_file.write(answer + "\n")
 
     def preprocess(self):
         self.split_data(self.filename)
@@ -259,7 +222,7 @@ def concatenate_data(filenames, out_filename):
                     outfile.write(line)
     with open(out_filename, "r") as f:
         lines = f.readlines()
-    random.seed(4)
+    random.seed(42)
     random.shuffle(lines)
     with open(out_filename, "w") as f:
         for line in lines:

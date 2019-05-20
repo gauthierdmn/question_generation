@@ -1,14 +1,7 @@
 # external libraries
-import os
-import re
-import pickle
-import string
-import numpy as np
-from collections import Counter
-from spacy.lang.en import English
 import torch
-from torch.utils.data.sampler import SubsetRandomSampler
 import torch.nn.functional as F
+from spacy.lang.en import English
 
 # internal utilities
 import config
@@ -45,6 +38,7 @@ def convert_idx(text, tokens):
             raise Exception()
         spans.append((current, current + len(token)))
         current += len(token)
+
     return spans
 
 
