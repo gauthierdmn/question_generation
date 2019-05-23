@@ -1,10 +1,19 @@
 # Neural Question Generation: Learning to Ask
 
-This projects aims at exploring automatic question generation from sentences in reading comprehension passages, conditioned on answers, using deep neural networks.
+This projects aims at exploring automatic question generation from sentences in reading comprehension passages using deep neural networks.
 
-More precisely, given a sequence of words S = *w1*, *w2*, ..., *wn*, the source sentence, and an answer span A = *wk*, ..., *wk+j*, a span in S, we want to generate a sequence of words Q = *q1*, *q2*, ..., *qm*, a question related to S and whose answer is A. 
+We can interpret this task as the reverse objective of Question Answering, where given a sentence and a question, we build an algorithm to find the answer. Here the goal is to generate a question given a sentence in input, and potentially an answer.
 
-We can interpret this task as the reverse objective of Question Answering, where given a sentence and a question, we build an algorithm to find the answer.
+Various paradigms can be considered:
+* given a sentence, generate a question on the sentence. This paradigm is very close to what is being done in Machine Translation where given an input sentence in language A, we intend to translate it into the corresponding sentence in language B. The main difference results in the size of the output space, which is much large for QG since a large number of questions can be created from a sentence.
+* given a sentence and an answer, a span in the sentence, generate a question on the sentence that can be answered by the answer we gave. The difference with the previous paradigm is that here the output space of potential generated question is much narrower since it is restricted by the answer.
+* given a paragraph, a sentence in the paragraph, an answer in the sentence, generate a question on the sentence that can be answered by the answer we gave. Here the paragraph could potentially help to generate a valid question, providing more context than the standalone sentence.
+
+For now, I implemented a baseline as described in Xinya Du, Junru Shao and Claire Cardie 's paper Learning to Ask: Neural Question Generation for Reading Comprehension.
+
+For their work, they used OpenNMT, a library built on top of Torch (resp. OpenNMT-py on top of PyTorch) specifically designed for Neural Machine Translation modeling.
+
+For learning purpose and fun, I decided to implement their work in PyTorch directly. It will also allow me to iterate more easily and test new ideas. Now if you are looking for performance, I highly advise you to have a look to OpenNMT instead, since their implementation is more efficient than mine.
 
 # Model Architecture
 
@@ -19,21 +28,27 @@ We can interpret this task as the reverse objective of Question Answering, where
     ├── model.py.          <- Define the Seq2Seq model architecture, with an encoder and a decoder
     ├── requirements.txt   <- Required Python libraries to build the project
     ├── train.py           <- Train the model
+    ├── eval.py            <- Use the model to generate questions on unseen data
     ├── utils.py           <- Group a bunch of useful functions to process the data
 
 # Results
 
 # Set-Up
 
-* Clone the repository
+Before running the following commands to train your model, you need to download the NewsQA dataset manually [here](https://github.com/Maluuba/newsqa). Follow the steps they describe, but you basically need to download the data as a ZIP file and use the helper functions provided to wrap it into a JSON file.
+
+Once it is done:
+
+* Clone this repository
 * Create a directory for your experiments, logs and model weights: `mkdir output`
 * Download GloVE word vectors: https://nlp.stanford.edu/projects/glove/
-* Modify the `config.py` file to set up the paths where your GloVE, SquAD and NewsQA datasets, models will be located
+* Modify the `config.py` file to set up the paths where your GloVE, SquAD and NewsQA datasets, and where your models will be saved
 * Create a Python virtual environment, source to it: `mkvirualenv qa-env ; workon qa-env` if you use virtualenvwrapper
 * Install the dependencies: `pip install -r requirements.txt ; python -m spacy download en`
-* Run `python make_dataset.py` to download SquAD and NewsQA datasets, and join the two into single files
+* Run `python make_dataset.py` to download SquAD dataset, and join SQuAD and NewsQA datasets into a single file
 * Run `python preprocessing.py` to preprocess the data
 * Run `python train.py` to train the model with hyper-parameters found in `config.py`
+* Run `python eval.py` on a test file to generate your own questions!
 
 # Next Steps
  
@@ -45,4 +60,3 @@ We can interpret this task as the reverse objective of Question Answering, where
 * NewsQA dataset: https://datasets.maluuba.com/NewsQA
 * GloVE: https://nlp.stanford.edu/projects/glove/
 * Learning to Ask: Neural Question Generation for Reading Comprehension by Xinya Du, Junru Shao, Claire Cardie: http://arxiv.org/abs/1705.00106
-* Machine Comprehension by Text-to-Text Neural Question Generation by Xingdi Yuan, Tong Wang, Caglar Gulcehre, Alessandro Sordoni, Philip Bachman, Sandeep Subramanian, Saizheng Zhang, and Adam Trischler: https://arxiv.org/pdf/1705.02012.pdf
