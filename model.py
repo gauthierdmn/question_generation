@@ -23,7 +23,7 @@ class Seq2Seq(nn.Module):
                                   dropout=drop_prob if n_layers > 1 else 0.,
                                   attention=True)
 
-    def forward(self, sentence, sentence_len, question):
+    def forward(self, sentence, sentence_len, question=None):
         enc_output, enc_hidden = self.enc(sentence, sentence_len)
         outputs = self.dec(enc_output, enc_hidden, question)
 

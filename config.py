@@ -29,3 +29,10 @@ n_layers = 2
 cuda = False
 pretrained = False
 
+# eval hyper-parameters
+eval_batch_size = 1
+min_len_sentence = 5
+greedy_decoding = False
+top_k = 0.
+top_p = 0.9
+temperature = 0.7

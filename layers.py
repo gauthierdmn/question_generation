@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -115,14 +114,15 @@ class Decoder(nn.Module):
 
         else:  # EVALUATION
             dec_input = torch.zeros(enc_out.size(0), 1).fill_(2).long().to(self.device)
+            input_feed = torch.zeros(batch_size, 1, enc_out.size(2), device=self.device)
             for t in range(0, self.max_len_sentence):
-                embedded = self.dropout(self.embedding(dec_input))  # (batch size, 1, emb dim)
+                dec_input = self.embedding(dec_input)  # (batch size, 1, emb dim)
+                dec_input = torch.cat((dec_input, input_feed), 2)
 
                 if isinstance(self.rnn, nn.GRU):
                     dec_output, dec_hidden = self.rnn(dec_input, dec_hidden[0])
                 else:
                     dec_output, dec_hidden = self.rnn(dec_input, dec_hidden)
-                    dec_output = self.dropout(dec_output)
 
                 if self.attn:
                     dec_output, p_attn = self.attn(dec_output, enc_out)
@@ -138,6 +138,7 @@ class Decoder(nn.Module):
                     break
                 outputs.append(out.item())
                 dec_input = out.long().unsqueeze(1)
+                input_feed = dec_output
 
         return outputs
 

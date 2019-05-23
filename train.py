@@ -99,7 +99,7 @@ else:
     best_valid_loss = 10000  # large number
     epoch_checkpoint = 1
 
-# train the Model
+# Train the model
 print("Starting training...")
 for epoch in range(hyper_params["num_epochs"]):
     print("##### epoch {:2d}".format(epoch))
@@ -118,7 +118,6 @@ for epoch in range(hyper_params["num_epochs"]):
         # Update the metrics
         num_non_padding, num_correct = correct_tokens(pred, question, padding_idx)
         mc.update_metrics(loss.item(), num_non_padding, num_correct)
-        print("loss:", loss.item() / num_non_padding)
 
         # Getting gradients w.r.t. parameters
         loss.backward()
