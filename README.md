@@ -5,18 +5,17 @@ This projects aims at exploring automatic question generation from sentences in 
 We can interpret this task as the reverse objective of Question Answering, where given a sentence and a question, we build an algorithm to find the answer. Here the goal is to generate a question given a sentence in input, and potentially an answer.
 
 Various paradigms can be considered:
-* given a sentence, generate a question on the sentence. This paradigm is very close to what is being done in Machine Translation where given an input sentence in language A, we intend to translate it into the corresponding sentence in language B. The main difference results in the size of the output space, which is much large for QG since a large number of questions can be created from a sentence.
+* given a sentence, generate a question on the sentence. This paradigm is very close to what is being done in Machine Translation where given an input sentence in language A, we intend to translate it into the corresponding sentence in language B. The main difference results in the size of the output space, which is much larger for QG since a large number of questions can be created from a sentence.
 * given a sentence and an answer, a span in the sentence, generate a question on the sentence that can be answered by the answer we gave. The difference with the previous paradigm is that here the output space of potential generated question is much narrower since it is restricted by the answer.
 * given a paragraph, a sentence in the paragraph, an answer in the sentence, generate a question on the sentence that can be answered by the answer we gave. Here the paragraph could potentially help to generate a valid question, providing more context than the standalone sentence.
 
-For now, I implemented a baseline as described in Xinya Du, Junru Shao and Claire Cardie 's paper Learning to Ask: Neural Question Generation for Reading Comprehension.
+For now, I implemented a baseline as described in Xinya Du, Junru Shao and Claire Cardie 's paper Learning to Ask: Neural Question Generation for Reading Comprehension, following the first paradigm.
 
 For their work, they used OpenNMT, a library built on top of Torch (resp. OpenNMT-py on top of PyTorch) specifically designed for Neural Machine Translation modeling.
 
 For learning purpose and fun, I decided to implement their work in PyTorch directly. It will also allow me to iterate more easily and test new ideas. Now if you are looking for performance, I highly advise you to have a look to OpenNMT instead, since their implementation is more efficient than mine.
 
 # Model Architecture
-
 ![Seq2Seq](seq2seq.png)
 
 # Code Organization
@@ -32,6 +31,10 @@ For learning purpose and fun, I decided to implement their work in PyTorch direc
     ├── utils.py           <- Group a bunch of useful functions to process the data
 
 # Results
+
+![Loss](qg-loss.png)
+![Accuracy](qg-acc.png)
+![Perplexity](qg-plp.png)
 
 # Set-Up
 
@@ -52,7 +55,12 @@ Once it is done:
 
 # Next Steps
  
-- [ ]
+[ ] Include the answer as input to the model, as well as the paragraph
+[ ] Use a pointer-generator to copy words from the source sentence
+[ ] Compare various decoding techniques: beam search vs top-K vs top-p (currently using top-K and top-p decoding)
+[ ] Improve the training process including Reinforcement Learning rewards such as in [this paper](https://arxiv.org/pdf/1705.02012.pdf)
+[ ] Investigate Transfer Learning as well as Multi Task Learning
+[ ] Increase the efficiency of the training process
 
 # Resources
 
