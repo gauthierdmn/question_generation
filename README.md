@@ -24,7 +24,7 @@ For learning purpose and fun, I decided to implement their work in PyTorch direc
     ├── preprocessing.py   <- Preprocess the input text files, building datasets and vocabularies for model training
     ├── layers.py          <- Define the various layers to be used by the main model
     ├── make_dataset.py    <- Download the SquAD and NewsQA datasets we use for this experiment
-    ├── model.py.          <- Define the Seq2Seq model architecture, with an encoder and a decoder
+    ├── model.py           <- Define the Seq2Seq model architecture, with an encoder and a decoder
     ├── requirements.txt   <- Required Python libraries to build the project
     ├── train.py           <- Train the model
     ├── eval.py            <- Use the model to generate questions on unseen data
@@ -55,12 +55,12 @@ Once it is done:
 
 # Next Steps
  
-[ ] Include the answer as input to the model, as well as the paragraph
-[ ] Use a pointer-generator to copy words from the source sentence
-[ ] Compare various decoding techniques: beam search vs top-K vs top-p (currently using top-K and top-p decoding)
-[ ] Improve the training process including Reinforcement Learning rewards such as in [this paper](https://arxiv.org/pdf/1705.02012.pdf)
-[ ] Investigate Transfer Learning as well as Multi Task Learning
-[ ] Increase the efficiency of the training process
+- [ ] Include the answer as input to the model, as well as the paragraph
+- [ ] Use a pointer-generator to copy words from the source sentence
+- [ ] Compare various decoding techniques: beam search vs top-K vs top-p (currently using top-K and top-p decoding)
+- [ ] Improve the training process including Reinforcement Learning rewards such as in [this paper](https://arxiv.org/pdf/1705.02012.pdf)
+- [ ] Investigate Transfer Learning as well as Multi Task Learning
+- [ ] Increase the efficiency of the training process
 
 # Resources
 
