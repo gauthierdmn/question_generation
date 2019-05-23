@@ -1,4 +1,6 @@
 # external libraries
+import numpy as np
+import math
 import torch
 import torch.nn.functional as F
 from spacy.lang.en import English
@@ -42,6 +44,16 @@ def convert_idx(text, tokens):
     return spans
 
 
+def correct_tokens(pred, true_tokens, padding_idx):
+    pred = pred.view(-1, pred.size(2))
+    pred = pred.max(1)[1]
+    true_tokens = true_tokens[:, 1:].contiguous()
+    non_padding = true_tokens.view(-1).ne(padding_idx)
+    num_correct = pred.eq(true_tokens.view(-1)).masked_select(non_padding).sum().item()
+    num_non_padding = non_padding.sum().item()
+    return num_non_padding, num_correct
+
+
 def save_checkpoint(state, is_best, filename="/output/checkpoint.pkl"):
     """Save checkpoint if a new best is achieved"""
     if is_best:
@@ -51,29 +63,80 @@ def save_checkpoint(state, is_best, filename="/output/checkpoint.pkl"):
         print("=> Validation loss did not improve.")
 
 
-def feature_tokenize(string, layer=0, tok_delim=None, feat_delim=None, truncate=None):
-    """Split apart word features (like POS/NER tags) from the tokens.
+class MetricReporter:
+    def __init__(self, last_epoch=0, verbose=True):
+        self.epoch = last_epoch
+        self.verbose = verbose
+        self.training = True
+        self.losses = 0
+        self.n_samples = 0
+        self.n_correct = 0
+        self.list_train_loss = []
+        self.list_train_accuracy = []
+        self.list_train_perplexity = []
+        self.list_valid_loss = []
+        self.list_valid_accuracy = []
+        self.list_valid_perplexity = []
 
-    Args:
-        string (str): A string with ``tok_delim`` joining tokens and
-            features joined by ``feat_delim``. For example,
-            ``"hello|NOUN|'' Earth|NOUN|PLANET"``.
-        layer (int): Which feature to extract. (Not used if there are no
-            features, indicated by ``feat_delim is None``). In the
-            example above, layer 2 is ``'' PLANET``.
-        truncate (int or NoneType): Restrict sequences to this length of
-            tokens.
+    def train(self):
+        self.epoch += 1
+        self.training = True
+        self.clear_metrics()
 
-    Returns:
-        List[str] of tokens.
-    """
+    def eval(self):
+        self.training = False
+        self.clear_metrics()
 
-    tokens = string.split(tok_delim)
-    if truncate is not None:
-        tokens = tokens[:truncate]
-    if feat_delim is not None:
-        tokens = [t.split(feat_delim)[layer] for t in tokens]
-    return tokens
+    def update_metrics(self, l, n_s, n_c):
+        self.losses += l
+        self.n_samples += n_s
+        self.n_correct += n_c
+
+    def compute_loss(self):
+        return np.round(self.losses / self.n_samples, 2)
+
+    def compute_accuracy(self):
+        return np.round(100 * (self.n_correct / self.n_samples), 2)
+
+    def compute_perplexity(self):
+        return np.round(math.exp(self.losses / float(self.n_samples)), 2)
+
+    def report_metrics(self):
+        # Compute metrics
+        set_name = "Train" if self.training else "Valid"
+        loss = self.compute_loss()
+        accuracy = self.compute_accuracy()
+        perplexity = self.compute_perplexity()
+        # Print the metrics to std output if verbose is True
+        if self.verbose:
+            print("{} loss of the model at epoch {} is: {}".format(set_name, self.epoch, loss))
+            print("{} accuracy of the model at epoch {} is: {}".format(set_name, self.epoch, accuracy))
+
+            print("{} perplexity of the model at epoch {} is: {}".format(set_name, self.epoch, perplexity))
+        # Store the metrics in lists
+        if self.train:
+            self.list_train_loss.append(loss)
+            self.list_train_accuracy.append(accuracy)
+            self.list_train_perplexity.append(perplexity)
+        else:
+            self.list_valid_loss.append(loss)
+            self.list_valid_accuracy.append(accuracy)
+            self.list_valid_perplexity.append(perplexity)
+
+    def clear_metrics(self):
+        self.losses = 0
+        self.n_samples = 0
+        self.n_correct = 0
+
+    def log_metrics(self, log_filename):
+        with open(log_filename, "w") as f:
+            f.write("Epochs:" + str(list(range(len(self.list_train_loss)))) + "\n")
+            f.write("Train loss:" + str(self.list_train_loss) + "\n")
+            f.write("Train accuracy:" + str(self.list_train_accuracy) + "\n")
+            f.write("Train perplexity:" + str(self.list_train_perplexity) + "\n")
+            f.write("Valid loss:" + str(self.list_valid_loss) + "\n")
+            f.write("Valid accuracy:" + str(self.list_valid_accuracy) + "\n")
+            f.write("Valid perplexity:" + str(self.list_valid_perplexity) + "\n")
 
 
 # The below functions are modified versions of functions from:
