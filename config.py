@@ -23,10 +23,12 @@ out_vocab_size = 28000
 num_epochs = 15
 batch_size = 64
 learning_rate = 1.0
-drop_prob = 0.3
-hidden_size = 512
+hidden_size = 600
 n_layers = 2
-cuda = False
+drop_prob = 0.3
+start_decay_epoch = 7
+decay_rate = 0.5
+cuda = True
 pretrained = False
 
 # eval hyper-parameters

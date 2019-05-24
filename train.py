@@ -27,6 +27,8 @@ hyper_params = {
     "hidden_size": config.hidden_size,
     "n_layers": config.n_layers,
     "drop_prob": config.drop_prob,
+    "start_decay_epoch": config.start_decay_epoch,
+    "decay_rate": config.decay_rate,
     "cuda": config.cuda,
     "pretrained": config.pretrained
 }
@@ -86,6 +88,10 @@ model.to(device)
 padding_idx = vocabs['trg_vocab'].stoi["<PAD>"]
 criterion = nn.NLLLoss(ignore_index=padding_idx, reduction="sum")
 optimizer = torch.optim.SGD(model.parameters(), hyper_params["learning_rate"])
+scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                 milestones=list(range(hyper_params["start_decay_epoch"],
+                                                                       hyper_params["num_epochs"] + 1)),
+                                                 gamma=hyper_params["decay_rate"])
 
 # Create an object to report the different metrics
 mc = MetricReporter()
@@ -105,6 +111,7 @@ for epoch in range(hyper_params["num_epochs"]):
     print("##### epoch {:2d}".format(epoch))
     model.train()
     mc.train()
+    scheduler.step()
     for i, batch in enumerate(train_dataloader):
         # Load a batch of input sentence, sentence lengths and questions
         sentence, len_sentence, question = batch.src[0].to(device), batch.src[1].to(device), batch.trg[0].to(device)
@@ -130,7 +137,7 @@ for epoch in range(hyper_params["num_epochs"]):
     mc.report_metrics()
     writer.add_scalars("train", {"loss": mc.list_train_loss[-1],
                                  "accuracy": mc.list_train_accuracy[-1],
-                                 "perplexity": mc.list_train_perplexity(),
+                                 "perplexity": mc.list_train_perplexity[-1],
                                  "epoch": mc.epoch})
 
     model.eval()
@@ -152,7 +159,7 @@ for epoch in range(hyper_params["num_epochs"]):
         mc.report_metrics()
         writer.add_scalars("valid", {"loss": mc.list_valid_loss[-1],
                                      "accuracy": mc.list_valid_accuracy[-1],
-                                     "perplexity": mc.list_valid_perplexity(),
+                                     "perplexity": mc.list_valid_perplexity[-1],
                                      "epoch": mc.epoch})
 
     # Save last model weights
