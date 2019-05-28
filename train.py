@@ -150,6 +150,8 @@ for epoch in range(hyper_params["num_epochs"]):
             sentence, len_sentence, question = batch.src[0].to(device), batch.src[1].to(device), batch.trg[0].to(device)
             # Forward pass to get output/logits
             pred = model(sentence, len_sentence, question)
+            # Stack the predictions into a tensor to compute the loss
+            pred = dress_for_loss(pred)
             # Calculate Loss: softmax --> negative log likelihood
             loss = criterion(pred.view(-1, pred.size(2)), question.view(-1))
 
