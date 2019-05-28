@@ -44,6 +44,11 @@ def convert_idx(text, tokens):
     return spans
 
 
+def dress_for_loss(prediction):
+    prediction = torch.stack(prediction).squeeze(0).transpose(0, 1).contiguous()
+    return prediction
+
+
 def correct_tokens(pred, true_tokens, padding_idx):
     pred = pred.view(-1, pred.size(2))
     pred = pred.max(1)[1]

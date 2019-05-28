@@ -11,7 +11,7 @@ from tensorboardX import SummaryWriter
 import config
 from preprocessing import DataPreprocessor
 from model import Seq2Seq
-from utils import save_checkpoint, correct_tokens, MetricReporter
+from utils import dress_for_loss, save_checkpoint, correct_tokens, MetricReporter
 
 # Preprocessing values used for training
 prepro_params = {
@@ -119,6 +119,8 @@ for epoch in range(hyper_params["num_epochs"]):
         optimizer.zero_grad()
         # Forward pass to get output/logits
         pred = model(sentence, len_sentence, question)
+        # Stack the predictions into a tensor to compute the loss
+        pred = dress_for_loss(pred)
         # Calculate Loss: softmax --> negative log likelihood
         loss = criterion(pred.view(-1, pred.size(2)), question[:, 1:].contiguous().view(-1))
 

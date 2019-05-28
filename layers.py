@@ -77,8 +77,7 @@ class Decoder(nn.Module):
         batch_size = enc_out.size(0)
 
         # tensor to store decoder outputs
-        outputs = torch.zeros(batch_size, self.max_len_sentence - 1, self.output_dim).to(
-            self.device) if question is not None else []
+        outputs = []
 
         # TODO: we should have a "if bidirectional:" statement here
         if isinstance(enc_hidden, tuple):  # meaning we have a LSTM encoder
@@ -107,7 +106,7 @@ class Decoder(nn.Module):
 
                 dec_output = self.dropout(dec_output)
 
-                outputs[:, t, :] = self.gen(dec_output)
+                outputs.append(self.gen(dec_output))
 
                 dec_input = question[:, t + 1].unsqueeze(1)
                 input_feed = dec_output
