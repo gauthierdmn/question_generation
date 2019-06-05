@@ -16,7 +16,8 @@ from utils import dress_for_loss, save_checkpoint, correct_tokens, MetricReporte
 # Preprocessing values used for training
 prepro_params = {
     "word_embedding_size": config.word_embedding_size,
-    "max_len_sentence": config.max_len_sentence,
+    "max_len_input_sentence": config.max_len_input_sentence,
+    "max_len_output_sentence": config.max_len_output_sentence,
 }
 
 # Hyper-parameters setup
@@ -60,12 +61,17 @@ train_dataset, valid_dataset, vocabs = dp.load_data(os.path.join(config.out_dir,
 # Load the data into datasets of mini-batches
 train_dataloader = data.BucketIterator(train_dataset,
                                        batch_size=hyper_params["batch_size"],
-                                       sort_key=lambda x: len(x.sentence),
-                                       shuffle=True)
+                                       sort_key=lambda x: len(x.src),
+                                       sort_within_batch=True,
+                                       device=device,
+                                       shuffle=False)
+
 
 valid_dataloader = data.BucketIterator(valid_dataset,
                                        batch_size=hyper_params["batch_size"],
-                                       sort_key=lambda x: len(x.sentence),
+                                       sort_key=lambda x: len(x.src),
+                                       sort_within_batch=True,
+                                       device=device,
                                        shuffle=True)
 
 print("Length of training data loader is:", len(train_dataloader))

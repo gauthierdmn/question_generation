@@ -106,7 +106,7 @@ class DataPreprocessor(object):
                                pad_token=PAD_WORD,
                                include_lengths=True,
                                batch_first=True,
-                               fix_length=config.max_len_sentence)
+                               fix_length=config.max_len_input_sentence)
 
         trg_field = data.Field(tokenize=word_tokenize,
                                init_token=SOS_WORD,
@@ -114,7 +114,7 @@ class DataPreprocessor(object):
                                pad_token=PAD_WORD,
                                include_lengths=True,
                                batch_first=True,
-                               fix_length=config.max_len_sentence)
+                               fix_length=config.max_len_output_sentence)
 
         return src_field, trg_field
 
@@ -143,5 +143,4 @@ if __name__ == "__main__":
                   os.path.join(config.out_dir, "dev"),
                   os.path.join(config.out_dir, "train-dataset.pt"),
                   os.path.join(config.out_dir, "dev-dataset.pt"),
-                  "sentence", "question",
-                  max_len=config.max_len_sentence)
+                  "sentence", "question", max_len=100)

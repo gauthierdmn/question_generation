@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from utils import sample_sequence
+import config
 
 
 class Encoder(nn.Module):
@@ -17,10 +18,9 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
 
         num_directions = 2 if bidirectional else 1
-        assert hidden_size % num_directions == 0
         hidden_size = hidden_size // num_directions
 
-        self.embedding = nn.Embedding.from_pretrained(word_vectors, freeze=True)
+        self.embedding = nn.Embedding.from_pretrained(word_vectors, padding_idx=1)
         self.drop_prob = drop_prob
         self.rnn = nn.LSTM(input_size, hidden_size, num_layers,
                            batch_first=True,
@@ -29,34 +29,23 @@ class Encoder(nn.Module):
 
     def forward(self, x, lengths):
         x = self.embedding(x)
-        # Save original padded length for use by pad_packed_sequence
-        orig_len = x.size(1)
 
-        # Sort by length and pack sequence for RNN
-        lengths, sort_idx = lengths.sort(0, descending=True)
-        x = x[sort_idx]     # (batch_size, seq_len, input_size)
         x = pack_padded_sequence(x, lengths, batch_first=True)
 
         # Apply RNN
         x, (hidden, cell) = self.rnn(x)  # (batch_size, seq_len, 2 * hidden_size)
 
         # Unpack and reverse sort
-        x, _ = pad_packed_sequence(x, batch_first=True, total_length=orig_len)
-        _, unsort_idx = sort_idx.sort(0)
-
-        x = x[unsort_idx]  # (batch_size, seq_len, 2 * hidden_size)
-        hidden = hidden[:, unsort_idx, :]
-        cell = cell[:, unsort_idx, :]
-
-        # Apply dropout (RNN applies dropout after all but the last layer)
-        x = F.dropout(x, self.drop_prob, self.training)
+        x, _ = pad_packed_sequence(x, batch_first=True)  # , total_length=orig_len)
 
         return x, (hidden, cell)
 
 
 class Decoder(nn.Module):
-    def __init__(self, input_size, hidden_size, word_vectors, n_layers, trg_vocab, device, dropout, attention=None,
-                 min_len_sentence=5, max_len_sentence=50, top_k=0., top_p=0.9, temperature=0.7, greedy_decoding=False):
+    def __init__(self, input_size, hidden_size, word_vectors, n_layers, trg_vocab, device, dropout,
+                 attention=None, min_len_sentence=config.min_len_sentence,
+                 max_len_sentence=config.max_len_output_sentence, top_k=config.top_k, top_p=config.top_p,
+                 temperature=config.temperature, greedy_decoding=config.greedy_decoding):
         super().__init__()
         self.output_dim = len(trg_vocab.itos)
         self.embedding = nn.Embedding.from_pretrained(word_vectors, freeze=True)
@@ -90,10 +79,9 @@ class Decoder(nn.Module):
         dec_hidden = enc_hidden
 
         if question is not None:  # TRAINING with teacher
-            dec_input = question[:, 0].unsqueeze(1)
+            q_emb = self.embedding(question)
             input_feed = torch.zeros(batch_size, 1, enc_out.size(2), device=self.device)
-            for t in range(0, self.max_len_sentence - 1):
-                dec_input = self.embedding(dec_input)  # (batch size, 1, emb dim)
+            for dec_input in q_emb[:, :-1, :].split(1, 1):
                 dec_input = torch.cat((dec_input, input_feed), 2)
 
                 if isinstance(self.rnn, nn.GRU):
@@ -105,10 +93,7 @@ class Decoder(nn.Module):
                     dec_output, p_attn = self.attn(dec_output, enc_out)
 
                 dec_output = self.dropout(dec_output)
-
                 outputs.append(self.gen(dec_output))
-
-                dec_input = question[:, t + 1].unsqueeze(1)
                 input_feed = dec_output
 
         else:  # EVALUATION

@@ -46,12 +46,13 @@ def maybe_download_squad(url, filename, out_dir):
 
 
 class SquadPreprocessor:
-    def __init__(self, data_dir, train_filename, dev_filename, tokenizer):
+    def __init__(self, data_dir, train_filename, dev_filename, tokenizer, use_answer=True):
         self.data_dir = data_dir
         self.train_filename = train_filename
         self.dev_filename = dev_filename
         self.data = None
         self.tokenizer = tokenizer
+        self.use_answer = use_answer
 
     def load_data(self, filename="train-v2.0.json"):
         filepath = os.path.join(self.data_dir, filename)
@@ -120,6 +121,7 @@ class SquadPreprocessor:
                                 for idx, start in enumerate(first_token_sentence):
                                     if answer_span[0] >= start:
                                         sentence_tokens = context_sentences[idx]
+                                        answer_sentence_span = [span - start for span in answer_span]
                                     else:
                                         break
                                 if not sentence_tokens:
@@ -127,10 +129,16 @@ class SquadPreprocessor:
                                     raise Exception()
 
                             # write to file
-                            context_file.write(" ".join(context_tokens) + "\n")
-                            sentence_file.write(" ".join(sentence_tokens) + "\n")
-                            question_file.write(" ".join([token for token in question_tokens]) + "\n")
-                            answer_file.write(" ".join([token for token in answer_tokens]) + "\n")
+                            if not self.use_answer:
+                                context_file.write(" ".join(context_tokens) + "\n")
+                                sentence_file.write(" ".join(sentence_tokens) + "\n")
+                                question_file.write(" ".join([token for token in question_tokens]) + "\n")
+                                answer_file.write(" ".join([token for token in answer_tokens]) + "\n")
+                            else:
+                                context_file.write(" ".join([token + "|" + "1" if idx in answer_span else token + "|" + "0" for idx, token in enumerate(context_tokens)]) + "\n")
+                                sentence_file.write(" ".join([token + "|" + "1" if idx in answer_sentence_span else token + "|" + "0" for idx, token in enumerate(sentence_tokens)]) + "\n")
+                                question_file.write(" ".join([token for token in question_tokens]) + "\n")
+                                answer_file.write(" ".join([token for token in answer_tokens]) + "\n")
 
     def preprocess(self):
         self.split_data(self.train_filename)
@@ -138,11 +146,12 @@ class SquadPreprocessor:
 
 
 class NewsQAPreprocessor:
-    def __init__(self, data_dir, filename, tokenizer):
+    def __init__(self, data_dir, filename, tokenizer, use_answer=True):
         self.data_dir = data_dir
         self.filename = filename
         self.data = None
         self.tokenizer = tokenizer
+        self.use_answer = use_answer
 
     def load_data(self, filename="combined-newsqa-data-v1.json"):
         filepath = os.path.join(self.data_dir, filename)
@@ -200,33 +209,83 @@ class NewsQAPreprocessor:
                             for idx, start in enumerate(first_token_sentence):
                                 if answer_span[0] >= start:
                                     sentence_tokens = context_sentences[idx]
+                                    answer_sentence_span = [span - start for span in answer_span]
                                 else:
                                     break
 
                             # write to file
-                            context_file.write(" ".join([token for token in context_tokens if token.strip("\n").strip()]) + "\n")
-                            sentence_file.write(" ".join([token for token in sentence_tokens if token.strip("\n").strip()]) + "\n")
-                            question_file.write(q + "\n")
-                            answer_file.write(answer + "\n")
+                            if not self.use_answer:
+                                context_file.write(" ".join(
+                                    [token for token in context_tokens if token.strip("\n").strip()]) + "\n")
+                                sentence_file.write(" ".join(
+                                    [token for token in sentence_tokens if token.strip("\n").strip()]) + "\n")
+                                question_file.write(q + "\n")
+                                answer_file.write(answer + "\n")
+                            else:
+                                sent = []
+                                for idx, token in enumerate(sentence_tokens):
+                                    if token.strip("\n").strip():
+                                        if idx in answer_sentence_span:
+                                            sent.append(token + "|" + "1")
+                                        else:
+                                            sent.append(token + "|" + "0")
+                                sent = " ".join(sent)
+                                sent = sent.strip()
+                                index = sent.find("(|0 CNN|0 )|0 --|0 ")
+                                if index > -1:
+                                    sent = sent[index + len("(|0 CNN|0 )|0 --|0 "):]
 
+                                ctxt = []
+                                for idx, token in enumerate(context_tokens):
+                                    if token.strip("\n").strip():
+                                        if idx in answer_span:
+                                            ctxt.append(token + "|" + "1")
+                                        else:
+                                            ctxt.append(token + "|" + "0")
+                                ctxt = " ".join(ctxt)
+                                ctxt = ctxt.strip()
+                                index = ctxt.find("(|0 CNN|0 )|0 --|0 ")
+                                if index > -1:
+                                    ctxt = ctxt[index + len("(|0 CNN|0 )|0 --|0 "):]
+
+                                context_file.write(ctxt + "\n")
+                                sentence_file.write(sent + "\n")
+                                question_file.write(q + "\n")
+                                answer_file.write(answer + "\n")
 
     def preprocess(self):
         self.split_data(self.filename)
 
 
-def concatenate_data(filenames, out_filename):
-    with open(out_filename, "w") as outfile:
-        for fname in filenames:
-            with open(fname) as infile:
-                for line in infile:
-                    outfile.write(line)
-    with open(out_filename, "r") as f:
-        lines = f.readlines()
-    random.seed(42)
-    random.shuffle(lines)
-    with open(out_filename, "w") as f:
-        for line in lines:
+def concatenate_data(squad_data_dir, newsqa_data_dir, out_dir, env="train"):
+    sentence_files = [os.path.join(squad_data_dir, env, env + ".sentence"),
+                      os.path.join(newsqa_data_dir, env, env + ".sentence")]
+    question_files = [os.path.join(squad_data_dir, env, env + ".question"),
+                      os.path.join(newsqa_data_dir, env, env + ".question")]
+    out_sentence_filename = os.path.join(out_dir, env + ".sentence")
+    out_question_filename = os.path.join(out_dir, env + ".question")
+
+    for infiles, outfile in zip([sentence_files, question_files], [out_sentence_filename, out_question_filename]):
+        with open(outfile, "w") as o:
+            for f in infiles:
+                with open(f) as infile:
+                    for line in infile:
+                        o.write(line)
+
+    with open(out_sentence_filename, "r") as f,\
+         open(out_question_filename, "r") as g:
+        sentence_lines = f.readlines()
+        question_lines = g.readlines()
+
+    sentence_lines, question_lines = zip(
+        *[(s, q) for s, q in sorted(zip(sentence_lines, question_lines), key=lambda x: len(word_tokenize(x[0])))])
+
+    with open(out_sentence_filename, "w") as f,\
+         open(out_question_filename, "w") as g:
+        for line in sentence_lines:
             f.write(line)
+        for line in question_lines:
+            g.write(line)
 
 
 if __name__ == "__main__":
@@ -237,24 +296,11 @@ if __name__ == "__main__":
     maybe_download_squad(squad_url, squad_train_filename, config.squad_data_dir)
     maybe_download_squad(squad_url, squad_dev_filename, config.squad_data_dir)
 
-    p1 = NewsQAPreprocessor(config.newsqa_data_dir, newsqa_filename, tokenizer)
+    p1 = NewsQAPreprocessor(config.newsqa_data_dir, newsqa_filename, tokenizer, use_answer=False)
     p1.preprocess()
 
-    p2 = SquadPreprocessor(config.squad_data_dir, squad_train_filename, squad_dev_filename, tokenizer)
+    p2 = SquadPreprocessor(config.squad_data_dir, squad_train_filename, squad_dev_filename, tokenizer, use_answer=False)
     p2.preprocess()
 
-    concatenate_data([os.path.join(config.squad_data_dir, "train", "train.sentence"),
-                      os.path.join(config.newsqa_data_dir, "train", "train.sentence")],
-                      os.path.join(config.out_dir, "train.sentence"))
-
-    concatenate_data([os.path.join(config.squad_data_dir, "train", "train.question"),
-                      os.path.join(config.newsqa_data_dir, "train", "train.question")],
-                      os.path.join(config.out_dir, "train.question"))
-
-    concatenate_data([os.path.join(config.squad_data_dir, "dev", "dev.sentence"),
-                      os.path.join(config.newsqa_data_dir, "dev", "dev.sentence")],
-                      os.path.join(config.out_dir, "dev.sentence"))
-
-    concatenate_data([os.path.join(config.squad_data_dir, "dev", "dev.question"),
-                      os.path.join(config.newsqa_data_dir, "dev", "dev.question")],
-                      os.path.join(config.out_dir, "dev.question"))
+    concatenate_data(config.squad_data_dir, config.newsqa_data_dir, config.out_dir, env="train")
+    concatenate_data(config.squad_data_dir, config.newsqa_data_dir, config.out_dir, env="dev")
