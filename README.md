@@ -37,10 +37,22 @@ For learning purpose and fun, I decided to implement their work in PyTorch direc
 ![Accuracy](fig/qg-acc.png)
 ![Perplexity](fig/qg-plp.png)
 
+Accuracy and perplexity after 15 epochs:
+
+| ACC  | PLP |
+| -----|:---:|
+| 43%  | 32.2|
+
 * Using a sentence and the answer to the question to be created
 
 ![Accuracy](fig/qg-acc-2.png)
 ![Perplexity](fig/qg-plp-2.png)
+
+Accuracy and perplexity after 15 epochs:
+
+| ACC  | PLP |
+| -----|:---:|
+| 47.3%| 25.2|
 
 # Set-Up
 
