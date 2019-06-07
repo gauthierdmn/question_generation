@@ -15,6 +15,7 @@ squad_models = "/Users/gdamien/Data/squad/models/"
 
 # preprocessing values
 word_embedding_size = 300
+answer_embedding_size = 2
 max_len_input_sentence = 100
 max_len_output_sentence = 50
 in_vocab_size = 45000
@@ -29,6 +30,7 @@ n_layers = 2
 drop_prob = 0.3
 start_decay_epoch = 8
 decay_rate = 0.5
+use_answer = True
 cuda = True
 pretrained = False
 

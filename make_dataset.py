@@ -46,13 +46,12 @@ def maybe_download_squad(url, filename, out_dir):
 
 
 class SquadPreprocessor:
-    def __init__(self, data_dir, train_filename, dev_filename, tokenizer, use_answer=True):
+    def __init__(self, data_dir, train_filename, dev_filename, tokenizer):
         self.data_dir = data_dir
         self.train_filename = train_filename
         self.dev_filename = dev_filename
         self.data = None
         self.tokenizer = tokenizer
-        self.use_answer = use_answer
 
     def load_data(self, filename="train-v2.0.json"):
         filepath = os.path.join(self.data_dir, filename)
@@ -129,16 +128,10 @@ class SquadPreprocessor:
                                     raise Exception()
 
                             # write to file
-                            if not self.use_answer:
-                                context_file.write(" ".join(context_tokens) + "\n")
-                                sentence_file.write(" ".join(sentence_tokens) + "\n")
-                                question_file.write(" ".join([token for token in question_tokens]) + "\n")
-                                answer_file.write(" ".join([token for token in answer_tokens]) + "\n")
-                            else:
-                                context_file.write(" ".join([token + "|" + "1" if idx in answer_span else token + "|" + "0" for idx, token in enumerate(context_tokens)]) + "\n")
-                                sentence_file.write(" ".join([token + "|" + "1" if idx in answer_sentence_span else token + "|" + "0" for idx, token in enumerate(sentence_tokens)]) + "\n")
-                                question_file.write(" ".join([token for token in question_tokens]) + "\n")
-                                answer_file.write(" ".join([token for token in answer_tokens]) + "\n")
+                            context_file.write(" ".join([token + u"￨" + "1" if idx in answer_span else token + u"￨" + "0" for idx, token in enumerate(context_tokens)]) + "\n")
+                            sentence_file.write(" ".join([token + u"￨" + "1" if idx in answer_sentence_span else token + u"￨" + "0" for idx, token in enumerate(sentence_tokens)]) + "\n")
+                            question_file.write(" ".join([token for token in question_tokens]) + "\n")
+                            answer_file.write(" ".join([token for token in answer_tokens]) + "\n")
 
     def preprocess(self):
         self.split_data(self.train_filename)
@@ -146,12 +139,11 @@ class SquadPreprocessor:
 
 
 class NewsQAPreprocessor:
-    def __init__(self, data_dir, filename, tokenizer, use_answer=True):
+    def __init__(self, data_dir, filename, tokenizer):
         self.data_dir = data_dir
         self.filename = filename
         self.data = None
         self.tokenizer = tokenizer
-        self.use_answer = use_answer
 
     def load_data(self, filename="combined-newsqa-data-v1.json"):
         filepath = os.path.join(self.data_dir, filename)
@@ -214,44 +206,36 @@ class NewsQAPreprocessor:
                                     break
 
                             # write to file
-                            if not self.use_answer:
-                                context_file.write(" ".join(
-                                    [token for token in context_tokens if token.strip("\n").strip()]) + "\n")
-                                sentence_file.write(" ".join(
-                                    [token for token in sentence_tokens if token.strip("\n").strip()]) + "\n")
-                                question_file.write(q + "\n")
-                                answer_file.write(answer + "\n")
-                            else:
-                                sent = []
-                                for idx, token in enumerate(sentence_tokens):
-                                    if token.strip("\n").strip():
-                                        if idx in answer_sentence_span:
-                                            sent.append(token + "|" + "1")
-                                        else:
-                                            sent.append(token + "|" + "0")
-                                sent = " ".join(sent)
-                                sent = sent.strip()
-                                index = sent.find("(|0 CNN|0 )|0 --|0 ")
-                                if index > -1:
-                                    sent = sent[index + len("(|0 CNN|0 )|0 --|0 "):]
+                            sent = []
+                            for idx, token in enumerate(sentence_tokens):
+                                if token.strip("\n").strip():
+                                    if idx in answer_sentence_span:
+                                        sent.append(token + u"￨" + "1")
+                                    else:
+                                        sent.append(token + u"￨" + "0")
+                            sent = " ".join(sent)
+                            sent = sent.strip()
+                            index = sent.find("(￨0 CNN￨0 )￨0 --￨0 ")
+                            if index > -1:
+                                sent = sent[index + len("(￨0 CNN￨0 )￨0 --￨0 "):]
 
-                                ctxt = []
-                                for idx, token in enumerate(context_tokens):
-                                    if token.strip("\n").strip():
-                                        if idx in answer_span:
-                                            ctxt.append(token + "|" + "1")
-                                        else:
-                                            ctxt.append(token + "|" + "0")
-                                ctxt = " ".join(ctxt)
-                                ctxt = ctxt.strip()
-                                index = ctxt.find("(|0 CNN|0 )|0 --|0 ")
-                                if index > -1:
-                                    ctxt = ctxt[index + len("(|0 CNN|0 )|0 --|0 "):]
+                            ctxt = []
+                            for idx, token in enumerate(context_tokens):
+                                if token.strip("\n").strip():
+                                    if idx in answer_span:
+                                        ctxt.append(token + u"￨" + "1")
+                                    else:
+                                        ctxt.append(token + u"￨" + "0")
+                            ctxt = " ".join(ctxt)
+                            ctxt = ctxt.strip()
+                            index = ctxt.find("(￨0 CNN￨0 )￨0 --￨0 ")
+                            if index > -1:
+                                ctxt = ctxt[index + len("(￨0 CNN￨0 )￨0 --￨0 "):]
 
-                                context_file.write(ctxt + "\n")
-                                sentence_file.write(sent + "\n")
-                                question_file.write(q + "\n")
-                                answer_file.write(answer + "\n")
+                            context_file.write(ctxt + "\n")
+                            sentence_file.write(sent + "\n")
+                            question_file.write(q + "\n")
+                            answer_file.write(answer + "\n")
 
     def preprocess(self):
         self.split_data(self.filename)
@@ -296,10 +280,10 @@ if __name__ == "__main__":
     maybe_download_squad(squad_url, squad_train_filename, config.squad_data_dir)
     maybe_download_squad(squad_url, squad_dev_filename, config.squad_data_dir)
 
-    p1 = NewsQAPreprocessor(config.newsqa_data_dir, newsqa_filename, tokenizer, use_answer=False)
+    p1 = NewsQAPreprocessor(config.newsqa_data_dir, newsqa_filename, tokenizer)
     p1.preprocess()
 
-    p2 = SquadPreprocessor(config.squad_data_dir, squad_train_filename, squad_dev_filename, tokenizer, use_answer=False)
+    p2 = SquadPreprocessor(config.squad_data_dir, squad_train_filename, squad_dev_filename, tokenizer)
     p2.preprocess()
 
     concatenate_data(config.squad_data_dir, config.newsqa_data_dir, config.out_dir, env="train")

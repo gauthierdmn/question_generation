@@ -16,6 +16,7 @@ from utils import dress_for_loss, save_checkpoint, correct_tokens, MetricReporte
 # Preprocessing values used for training
 prepro_params = {
     "word_embedding_size": config.word_embedding_size,
+    "answer_embedding_size": config.answer_embedding_size,
     "max_len_input_sentence": config.max_len_input_sentence,
     "max_len_output_sentence": config.max_len_output_sentence,
 }
@@ -30,6 +31,7 @@ hyper_params = {
     "drop_prob": config.drop_prob,
     "start_decay_epoch": config.start_decay_epoch,
     "decay_rate": config.decay_rate,
+    "use_answer": config.use_answer,
     "cuda": config.cuda,
     "pretrained": config.pretrained
 }
@@ -83,7 +85,8 @@ model = Seq2Seq(in_vocab=vocabs["src_vocab"],
                 n_layers=hyper_params["n_layers"],
                 trg_vocab=vocabs['trg_vocab'],
                 device=device,
-                drop_prob=hyper_params["drop_prob"])
+                drop_prob=hyper_params["drop_prob"],
+                use_answer=hyper_params["use_answer"])
 
 # Resume training if checkpoint
 if hyper_params["pretrained"]:
@@ -119,12 +122,13 @@ for epoch in range(hyper_params["num_epochs"]):
     mc.train()
     scheduler.step()
     for i, batch in enumerate(train_dataloader):
-        # Load a batch of input sentence, sentence lengths and questions
+        # Load a batch of input sentences, sentence lengths, questions and potentially answers
         sentence, len_sentence, question = batch.src[0].to(device), batch.src[1].to(device), batch.trg[0].to(device)
+        answer = batch.feat.to(device) if hyper_params["use_answer"] else None
         # Clear gradients w.r.t. parameters
         optimizer.zero_grad()
         # Forward pass to get output/logits
-        pred = model(sentence, len_sentence, question)
+        pred = model(sentence, len_sentence, question, answer)
         # Stack the predictions into a tensor to compute the loss
         pred = dress_for_loss(pred)
         # Calculate Loss: softmax --> negative log likelihood
@@ -154,8 +158,9 @@ for epoch in range(hyper_params["num_epochs"]):
         for i, batch in enumerate(valid_dataloader):
             # Load a batch of input sentence, sentence lengths and questions
             sentence, len_sentence, question = batch.src[0].to(device), batch.src[1].to(device), batch.trg[0].to(device)
+            answer = batch.feat.to(device) if hyper_params["use_answer"] else None
             # Forward pass to get output/logits
-            pred = model(sentence, len_sentence, question)
+            pred = model(sentence, len_sentence, question,  answer)
             # Stack the predictions into a tensor to compute the loss
             pred = dress_for_loss(pred)
             # Calculate Loss: softmax --> negative log likelihood

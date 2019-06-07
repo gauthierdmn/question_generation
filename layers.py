@@ -7,6 +7,23 @@ from utils import sample_sequence
 import config
 
 
+class Embedding(nn.Module):
+    def __init__(self, word_vectors, padding_idx, drop_prob):
+        super(Embedding, self).__init__()
+        self.drop_prob = drop_prob
+        self.w_embed = nn.Embedding.from_pretrained(word_vectors, padding_idx=padding_idx, freeze=False)
+        self.f_embed = nn.Embedding(4, config.answer_embedding_size, padding_idx=padding_idx)
+
+    def forward(self, x, y=None):
+        emb = self.w_embed(x)
+        if y is not None:
+            f_emb = self.f_embed(y)
+            emb = torch.cat((emb, f_emb), dim=-1)
+        emb = F.dropout(emb, self.drop_prob, self.training)
+
+        return emb
+
+
 class Encoder(nn.Module):
     def __init__(self,
                  input_size,
@@ -20,15 +37,15 @@ class Encoder(nn.Module):
         num_directions = 2 if bidirectional else 1
         hidden_size = hidden_size // num_directions
 
-        self.embedding = nn.Embedding.from_pretrained(word_vectors, padding_idx=1)
+        self.embedding = Embedding(word_vectors, padding_idx=1, drop_prob=drop_prob)
         self.drop_prob = drop_prob
         self.rnn = nn.LSTM(input_size, hidden_size, num_layers,
                            batch_first=True,
                            bidirectional=bidirectional,
                            dropout=drop_prob if num_layers > 1 else 0.)
 
-    def forward(self, x, lengths):
-        x = self.embedding(x)
+    def forward(self, x, lengths, y=None):
+        x = self.embedding(x, y)
 
         x = pack_padded_sequence(x, lengths, batch_first=True)
 

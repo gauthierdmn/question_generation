@@ -23,11 +23,17 @@ def clean_text(text):
 
 
 def word_tokenize(text):
-    return [token.text for token in tokenizer(text) if token.text]
+    tokens = [token.text for token in tokenizer(text) if token.text]
+    tokens = [t for t in tokens if t.strip("\n").strip()]
+    return tokens
 
 
 def sent_tokenize(text):
     return [[token.text for token in sentence if token.text] for sentence in tokenizer(text).sents]
+
+
+def feature_tokenize(text, f_sep=u"￨"):
+    return [t.split(f_sep)[0] for t in text.split()], [t.split(f_sep)[1] for t in text.split()]
 
 
 def convert_idx(text, tokens):
