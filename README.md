@@ -16,7 +16,7 @@ For their work, they used OpenNMT, a library built on top of Torch (resp. OpenNM
 For learning purpose and fun, I decided to implement their work in PyTorch directly. It will also allow me to iterate more easily and test new ideas. Now if you are looking for performance, I highly advise you to have a look to OpenNMT instead, since their implementation is more efficient than mine.
 
 # Model Architecture
-![Seq2Seq](fig/qg-seq2seq2.png)
+![Seq2Seq](fig/qg-seq2seq.png)
 
 # Code Organization
 
