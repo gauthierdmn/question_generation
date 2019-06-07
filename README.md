@@ -16,7 +16,7 @@ For their work, they used OpenNMT, a library built on top of Torch (resp. OpenNM
 For learning purpose and fun, I decided to implement their work in PyTorch directly. It will also allow me to iterate more easily and test new ideas. Now if you are looking for performance, I highly advise you to have a look to OpenNMT instead, since their implementation is more efficient than mine.
 
 # Model Architecture
-![Seq2Seq](seq2seq.png)
+![Seq2Seq](fig/seq2seq.png)
 
 # Code Organization
 
@@ -32,9 +32,15 @@ For learning purpose and fun, I decided to implement their work in PyTorch direc
 
 # Results
 
-![Loss](qg-loss.png)
-![Accuracy](qg-acc.png)
-![Perplexity](qg-plp.png)
+* Using only a sentence as input
+
+![Accuracy](fig/qg-acc.png)
+![Perplexity](fig/qg-plp.png)
+
+* Using a sentence and the answer to the question to be created
+
+![Accuracy](fig/qg-acc-2.png)
+![Perplexity](fig/qg-plp-2.png)
 
 # Set-Up
 
