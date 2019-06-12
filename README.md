@@ -54,6 +54,17 @@ Accuracy and perplexity after 15 epochs:
 | -----|:---:|
 | 47.3%| 25.2|
 
+* Using the full paragraph and the answer to the question to be created
+
+![Accuracy](fig/qg-acc-3.png)
+![Perplexity](fig/qg-plp-3.png)
+
+Accuracy and perplexity after 15 epochs:
+
+| ACC  | PLP |
+| -----|:---:|
+| 46.5%| 26.6|
+
 # Set-Up
 
 Before running the following commands to train your model, you need to download the NewsQA dataset manually [here](https://github.com/Maluuba/newsqa). Follow the steps they describe, but you basically need to download the data as a ZIP file and use the helper functions provided to wrap it into a JSON file.

@@ -4,7 +4,6 @@ import tqdm
 import json
 import zipfile
 import tarfile
-import random
 import urllib.request
 
 # internal utilities
@@ -79,6 +78,8 @@ class SquadPreprocessor:
                     context = paragraph['context']
                     context = clean_text(context)
                     context_tokens = word_tokenize(context)
+                    if config.paragraph and (len(context_tokens) < config.min_len_context or len(context_tokens) > config.max_len_context):
+                        continue
                     context_sentences = sent_tokenize(context)
                     spans = convert_idx(context, context_tokens)
                     num_tokens = 0
@@ -92,7 +93,7 @@ class SquadPreprocessor:
                         question = qa['question']
                         question = clean_text(question)
                         question_tokens = word_tokenize(question)
-                        if question_tokens[-1] != "?" or len(question_tokens) < 5 or len(question_tokens) > 20:
+                        if question_tokens[-1] != "?" or len(question_tokens) < config.min_len_question or len(question_tokens) > config.max_len_question:
                             continue
                         if sub_dir == "train":
                             # select only one ground truth, the top answer, if any answer
@@ -166,23 +167,24 @@ class NewsQAPreprocessor:
 
                 # loop over the data
                 for article in tqdm.tqdm(self.data["data"]):
+                    context = article["text"]
+                    context_tokens = word_tokenize(context)
+                    context_sentences = sent_tokenize(context)
+                    if config.paragraph and (len(context_tokens) < config.min_len_context or len(
+                            context_tokens) > config.max_len_context):
+                        continue
+                    spans = convert_idx(context, context_tokens)
+                    num_tokens = 0
+                    first_token_sentence = []
+                    for sentence in context_sentences:
+                        first_token_sentence.append(num_tokens)
+                        num_tokens += len(sentence)
                     if not article["type"] == sub_dir:
                         continue
                     for question in article["questions"]:
                         if question.get("isQuestionBad") == 0 and question["consensus"].get("s"):
-                            context = article["text"]
-                            context_tokens = word_tokenize(context)
-                            context_sentences = sent_tokenize(context)
-
-                            spans = convert_idx(context, context_tokens)
-                            num_tokens = 0
-                            first_token_sentence = []
-                            for sentence in context_sentences:
-                                first_token_sentence.append(num_tokens)
-                                num_tokens += len(sentence)
-
                             q = question["q"].strip()
-                            if q[-1] != "?" or len(q.split()) < 5 or len(q.split()) > 20:
+                            if q[-1] != "?" or len(q.split()) < config.min_len_question or len(q.split()) > config.max_len_question:
                                 continue
                             answer_start = question["consensus"]["s"]
                             answer = context[question["consensus"]["s"]: question["consensus"]["e"]].strip(".| ").strip("\n")
@@ -241,12 +243,13 @@ class NewsQAPreprocessor:
         self.split_data(self.filename)
 
 
-def concatenate_data(squad_data_dir, newsqa_data_dir, out_dir, env="train"):
-    sentence_files = [os.path.join(squad_data_dir, env, env + ".sentence"),
-                      os.path.join(newsqa_data_dir, env, env + ".sentence")]
+def concatenate_data(squad_data_dir, newsqa_data_dir, out_dir, env="train", full_context=False):
+    ext = ".context" if full_context else ".sentence"
+    sentence_files = [os.path.join(squad_data_dir, env, env + ext),
+                      os.path.join(newsqa_data_dir, env, env + ext)]
     question_files = [os.path.join(squad_data_dir, env, env + ".question"),
                       os.path.join(newsqa_data_dir, env, env + ".question")]
-    out_sentence_filename = os.path.join(out_dir, env + ".sentence")
+    out_sentence_filename = os.path.join(out_dir, env + ext)
     out_question_filename = os.path.join(out_dir, env + ".question")
 
     for infiles, outfile in zip([sentence_files, question_files], [out_sentence_filename, out_question_filename]):
@@ -286,5 +289,5 @@ if __name__ == "__main__":
     p2 = SquadPreprocessor(config.squad_data_dir, squad_train_filename, squad_dev_filename, tokenizer)
     p2.preprocess()
 
-    concatenate_data(config.squad_data_dir, config.newsqa_data_dir, config.out_dir, env="train")
-    concatenate_data(config.squad_data_dir, config.newsqa_data_dir, config.out_dir, env="dev")
+    concatenate_data(config.squad_data_dir, config.newsqa_data_dir, config.out_dir, env="train", full_context=config.paragraph)
+    concatenate_data(config.squad_data_dir, config.newsqa_data_dir, config.out_dir, env="dev", full_context=config.paragraph)

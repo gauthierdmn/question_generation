@@ -17,8 +17,8 @@ from utils import dress_for_loss, save_checkpoint, correct_tokens, MetricReporte
 prepro_params = {
     "word_embedding_size": config.word_embedding_size,
     "answer_embedding_size": config.answer_embedding_size,
-    "max_len_input_sentence": config.max_len_input_sentence,
-    "max_len_output_sentence": config.max_len_output_sentence,
+    "max_len_context": config.max_len_context,
+    "max_len_question": config.max_len_question,
 }
 
 # Hyper-parameters setup

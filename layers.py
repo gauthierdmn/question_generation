@@ -61,7 +61,7 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, input_size, hidden_size, word_vectors, n_layers, trg_vocab, device, dropout,
                  attention=None, min_len_sentence=config.min_len_sentence,
-                 max_len_sentence=config.max_len_output_sentence, top_k=config.top_k, top_p=config.top_p,
+                 max_len_sentence=config.max_len_question, top_k=config.top_k, top_p=config.top_p,
                  temperature=config.temperature, greedy_decoding=config.greedy_decoding):
         super().__init__()
         self.output_dim = len(trg_vocab.itos)
