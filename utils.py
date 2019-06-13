@@ -150,6 +150,38 @@ class MetricReporter:
             f.write("Valid perplexity:" + str(self.list_valid_perplexity) + "\n")
 
 
+class PriorityQueue(object):
+    def __init__(self):
+        self.queue = []
+
+    def __str__(self):
+        return ' '.join([str(i) for i in self.queue])
+
+        # for checking if the queue is empty
+
+    def isEmpty(self):
+        return len(self.queue) == []
+
+        # for inserting an element in the queue
+
+    def put(self, data):
+        self.queue.append(data)
+
+        # for popping an element based on Priority
+
+    def get(self):
+        try:
+            max = 0
+            for i in range(len(self.queue)):
+                if self.queue[i][0] > self.queue[max][0]:
+                    max = i
+            item = self.queue[max]
+            del self.queue[max]
+            return item
+        except IndexError:
+            print()
+            exit()
+
 # The below functions are modified versions of functions from:
 # https://github.com/huggingface/transfer-learning-conv-ai/blob/master/train.py (MIT License)
 

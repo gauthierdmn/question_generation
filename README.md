@@ -13,7 +13,7 @@ For now, I implemented a baseline as described in Xinya Du, Junru Shao and Clair
 
 For their work, they used OpenNMT, a library built on top of Torch (resp. OpenNMT-py on top of PyTorch) specifically designed for Neural Machine Translation modeling.
 
-For learning purpose and fun, I decided to implement their work in PyTorch directly. It will also allow me to iterate more easily and test new ideas. Now if you are looking for performance, I highly advise you to have a look to OpenNMT instead, since their implementation is more efficient than mine.
+For learning purpose and fun, I decided to implement their work in PyTorch directly. Now if you are looking for performance, I highly advise you to have a look at OpenNMT instead, since their implementation is more efficient than mine.
 
 # Model Architecture
 ![Seq2Seq](fig/qg-seq2seq.png)
@@ -84,12 +84,9 @@ Once it is done:
 
 # Next Steps
  
-- [ ] Include the answer as input to the model, as well as the paragraph
 - [ ] Use a pointer-generator to copy words from the source sentence
-- [ ] Compare various decoding techniques: beam search vs top-K vs top-p (currently using top-K and top-p decoding)
 - [ ] Improve the training process including Reinforcement Learning rewards such as in [this paper](https://arxiv.org/pdf/1705.02012.pdf)
 - [ ] Investigate Transfer Learning as well as Multi Task Learning
-- [ ] Increase the efficiency of the training process
 
 # Resources
 

@@ -2,8 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+import operator
+import functools
 
-from utils import sample_sequence
+from utils import sample_sequence, PriorityQueue
 import config
 
 
@@ -62,7 +64,7 @@ class Decoder(nn.Module):
     def __init__(self, input_size, hidden_size, word_vectors, n_layers, trg_vocab, device, dropout,
                  attention=None, min_len_sentence=config.min_len_sentence,
                  max_len_sentence=config.max_len_question, top_k=config.top_k, top_p=config.top_p,
-                 temperature=config.temperature, greedy_decoding=config.greedy_decoding):
+                 temperature=config.temperature, decode_type=config.decode_type):
         super().__init__()
         self.output_dim = len(trg_vocab.itos)
         self.embedding = nn.Embedding.from_pretrained(word_vectors, freeze=True)
@@ -75,9 +77,157 @@ class Decoder(nn.Module):
         self.top_k = top_k
         self.top_p = top_p
         self.temperature = temperature
-        self.greedy_decoding = greedy_decoding
+        self.decode_type = decode_type
         self.special_tokens_ids = [trg_vocab.stoi[t] for t in ["<EOS>", "<PAD>"]]
         self.device = device
+
+    def decode_rnn(self, dec_input, dec_hidden, enc_out):
+        if isinstance(self.rnn, nn.GRU):
+            dec_output, dec_hidden = self.rnn(dec_input, dec_hidden[0])
+        else:
+            dec_output, dec_hidden = self.rnn(dec_input, dec_hidden)
+
+        if self.attn:
+            dec_output, p_attn = self.attn(dec_output, enc_out)
+
+        dec_output = self.dropout(dec_output)
+
+        return dec_output, dec_hidden
+
+    def top_k_top_p_decode(self, dec_hidden, enc_out):
+        batch_size = enc_out.size(0)
+        outputs = []
+
+        dec_input = torch.zeros(enc_out.size(0), 1).fill_(2).long().to(self.device)
+        input_feed = torch.zeros(batch_size, 1, enc_out.size(2), device=self.device)
+
+        for t in range(0, self.max_len_sentence):
+            dec_input = self.embedding(dec_input)  # (batch size, 1, emb dim)
+            dec_input = torch.cat((dec_input, input_feed), 2)
+
+            dec_output, dec_hidden = self.decode_rnn(dec_input, dec_hidden, enc_out)
+
+            out = self.gen(dec_output)
+
+            out, probs = sample_sequence(out, self.top_k, self.top_p, self.temperature, False)
+            if t < self.min_len_sentence and out.item() in self.special_tokens_ids:
+                while out.item() in self.special_tokens_ids:
+                    out = torch.multinomial(probs, num_samples=1)
+
+            if out.item() in self.special_tokens_ids:
+                return outputs
+            outputs.append(out.item())
+            dec_input = out.long().unsqueeze(1)
+            input_feed = dec_output
+
+        return outputs
+
+    def beam_decode(self, dec_hidden, enc_out):
+        beam_width = 10
+        topk = 1  # how many sentence do you want to generate
+
+        batch_size = enc_out.size(0)
+
+        dec_input = torch.zeros(enc_out.size(0), 1).fill_(2).long().to(self.device)
+        input_feed = torch.zeros(batch_size, 1, enc_out.size(2), device=self.device)
+
+        # Number of sentence to generate
+        endnodes = []
+        number_required = min((topk + 1), topk - len(endnodes))
+
+        # starting node -  hidden vector, previous node, word id, logp, length
+        node = BeamSearchNode(dec_hidden, None, dec_input, 0, 1)
+        nodes = PriorityQueue()
+
+        # start the queue
+        nodes.put((-node.eval(), node))
+        qsize = 1
+
+        # start beam search
+        for i in range(self.max_len_sentence):
+            # give up when decoding takes too long
+            if qsize > 2000:
+                break
+
+            # fetch the best node
+            score, n = nodes.get()
+            dec_input = n.wordid
+            dec_hidden = n.h
+            if n.wordid.item() in self.special_tokens_ids and n.prevNode != None:
+                endnodes.append((score, n))
+                # if we reached maximum # of sentences required
+                if len(endnodes) >= number_required:
+                    break
+                else:
+                    continue
+            dec_input = self.embedding(dec_input)  # (batch size, 1, emb dim)
+            dec_input = torch.cat((dec_input, input_feed), 2)
+            dec_output, dec_hidden = self.decode_rnn(dec_input, dec_hidden, enc_out)
+            out = self.gen(dec_output)
+            input_feed = dec_output
+
+            # PUT HERE REAL BEAM SEARCH OF TOP
+            log_prob, indexes = torch.topk(out, beam_width)
+            nextnodes = []
+
+            for new_k in range(beam_width):
+                decoded_t = indexes[0][new_k].view(1, -1)
+                log_p = log_prob[0][new_k].item()
+
+                node = BeamSearchNode(dec_hidden, n, decoded_t, n.logp + log_p, n.leng + 1)
+                score = -node.eval()
+                nextnodes.append((score, node))
+            # put them into queue
+            for i in range(len(nextnodes)):
+                score, nn = nextnodes[i]
+                nodes.put((score, nn))
+                # increase qsize
+            qsize += len(nextnodes) - 1
+
+        # choose nbest paths, back trace them
+        if len(endnodes) == 0:
+            endnodes = [nodes.get() for _ in range(topk)]
+
+        utterances = []
+        for score, n in sorted(endnodes, key=operator.itemgetter(0)):
+            utterance = []
+            utterance.append(n.wordid.item())
+            # back trace
+            while n.prevNode != None:
+                n = n.prevNode
+                utterance.append(n.wordid.item())
+
+            utterance = utterance[::-1]
+            utterances.append(utterance)
+
+        return utterances[0]
+
+    def greedy_decode(self, dec_hidden, enc_out):
+        batch_size = enc_out.size(0)
+        outputs = []
+
+        dec_input = torch.zeros(enc_out.size(0), 1).fill_(2).long().to(self.device)
+        input_feed = torch.zeros(batch_size, 1, enc_out.size(2), device=self.device)
+
+        for t in range(0, self.max_len_sentence):
+            dec_input = self.embedding(dec_input)  # (batch size, 1, emb dim)
+            dec_input = torch.cat((dec_input, input_feed), 2)
+
+            dec_output, dec_hidden = self.decode_rnn(dec_input, dec_hidden, enc_out)
+
+            out = self.gen(dec_output)
+
+            topv, topi = out.data.topk(1)  # get candidates
+            topi = topi.view(-1)
+
+            if topi.item() in self.special_tokens_ids:
+                return outputs
+
+            outputs.append(topi.item())
+            dec_input = topi.detach().view(-1, 1)
+            input_feed = dec_output
+
+        return outputs
 
     def forward(self, enc_out, enc_hidden, question=None):
         batch_size = enc_out.size(0)
@@ -101,45 +251,21 @@ class Decoder(nn.Module):
             for dec_input in q_emb[:, :-1, :].split(1, 1):
                 dec_input = torch.cat((dec_input, input_feed), 2)
 
-                if isinstance(self.rnn, nn.GRU):
-                    dec_output, dec_hidden = self.rnn(dec_input, dec_hidden[0])
-                else:
-                    dec_output, dec_hidden = self.rnn(dec_input, dec_hidden)
+                dec_output, dec_hidden = self.decode_rnn(dec_input, dec_hidden, enc_out)
 
-                if self.attn:
-                    dec_output, p_attn = self.attn(dec_output, enc_out)
-
-                dec_output = self.dropout(dec_output)
                 outputs.append(self.gen(dec_output))
                 input_feed = dec_output
 
         else:  # EVALUATION
-            dec_input = torch.zeros(enc_out.size(0), 1).fill_(2).long().to(self.device)
-            input_feed = torch.zeros(batch_size, 1, enc_out.size(2), device=self.device)
-            for t in range(0, self.max_len_sentence):
-                dec_input = self.embedding(dec_input)  # (batch size, 1, emb dim)
-                dec_input = torch.cat((dec_input, input_feed), 2)
-
-                if isinstance(self.rnn, nn.GRU):
-                    dec_output, dec_hidden = self.rnn(dec_input, dec_hidden[0])
-                else:
-                    dec_output, dec_hidden = self.rnn(dec_input, dec_hidden)
-
-                if self.attn:
-                    dec_output, p_attn = self.attn(dec_output, enc_out)
-
-                out = self.gen(dec_output)
-
-                out, probs = sample_sequence(out, self.top_k, self.top_p, self.temperature, self.greedy_decoding)
-                if t < self.min_len_sentence and out.item() in self.special_tokens_ids:
-                    while out.item() in self.special_tokens_ids:
-                        out = torch.multinomial(probs, num_samples=1)
-
-                if out.item() in self.special_tokens_ids:
-                    break
-                outputs.append(out.item())
-                dec_input = out.long().unsqueeze(1)
-                input_feed = dec_output
+            if self.decode_type not in ["topk", "beam", "greedy"]:
+                print("The decode_type config value needs to be either topk, beam or greedy.")
+                return outputs
+            if self.decode_type == "topk":
+                outputs = self.top_k_top_p_decode(dec_hidden, enc_out)
+            elif self.decode_type == "beam":
+                outputs = self.beam_decode(dec_hidden, enc_out)
+            else:
+                outputs = self.greedy_decode(dec_hidden, enc_out)
 
         return outputs
 
@@ -226,3 +352,18 @@ class Attention(nn.Module):
         align_vectors = align_vectors.transpose(0, 1).contiguous()
 
         return attn_h.permute(1, 0, 2), align_vectors
+
+
+class BeamSearchNode(object):
+    def __init__(self, hiddenstate, previousNode, wordId, logProb, length):
+        self.h = hiddenstate
+        self.prevNode = previousNode
+        self.wordid = wordId
+        self.logp = logProb
+        self.leng = length
+
+    def eval(self, alpha=1.0):
+        reward = 0
+        # Add here a function for shaping a reward
+
+        return self.logp / float(self.leng - 1 + 1e-6) + alpha * reward

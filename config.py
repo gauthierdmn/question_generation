@@ -14,7 +14,7 @@ glove = "/Users/gdamien/Data/glove.6B/"
 squad_models = "/Users/gdamien/Data/squad/models/"
 
 # preprocessing values
-paragraph = True
+paragraph = False
 min_len_context = 5
 max_len_context = 100 if not paragraph else 1000
 min_len_question = 5
@@ -34,13 +34,13 @@ drop_prob = 0.3
 start_decay_epoch = 8
 decay_rate = 0.5
 use_answer = True
-cuda = False
+cuda = True
 pretrained = False
 
 # eval hyper-parameters
 eval_batch_size = 1
 min_len_sentence = 5
-greedy_decoding = False
 top_k = 0.
 top_p = 0.9
 temperature = 0.7
+decode_type = "topk"
