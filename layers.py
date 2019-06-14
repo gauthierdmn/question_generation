@@ -3,9 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import operator
-import functools
 
-from utils import sample_sequence, PriorityQueue
+from utils import sample_sequence, BeamSearchNode, Beam
 import config
 
 
@@ -122,85 +121,88 @@ class Decoder(nn.Module):
 
         return outputs
 
-    def beam_decode(self, dec_hidden, enc_out):
-        beam_width = 10
-        topk = 1  # how many sentence do you want to generate
+    def beam_decode(self, dec_hidden, enc_out, beam_width=3, topk=3):
+        # Start decoding step with <SOS> token and empty input feed, stored in a Beam node
+        dec_input = torch.zeros(1, 1).fill_(2).long().to(self.device)
+        input_feed = torch.zeros(1, 1, enc_out.size(2), device=self.device)
+        node = BeamSearchNode(dec_hidden, None, dec_input, 0, 1, input_feed)
 
-        batch_size = enc_out.size(0)
-
-        dec_input = torch.zeros(enc_out.size(0), 1).fill_(2).long().to(self.device)
-        input_feed = torch.zeros(batch_size, 1, enc_out.size(2), device=self.device)
-
-        # Number of sentence to generate
+        # Initialize Beam queue objects and an output list
+        in_nodes = Beam()
+        out_nodes = Beam()
         endnodes = []
-        number_required = min((topk + 1), topk - len(endnodes))
 
-        # starting node -  hidden vector, previous node, word id, logp, length
-        node = BeamSearchNode(dec_hidden, None, dec_input, 0, 1)
-        nodes = PriorityQueue()
+        # Feed the input Beam queue with the start token
+        in_nodes.put((node.eval(), node))
 
-        # start the queue
-        nodes.put((-node.eval(), node))
-        qsize = 1
-
-        # start beam search
+        # Start Beam search
         for i in range(self.max_len_sentence):
-            # give up when decoding takes too long
-            if qsize > 2000:
+            # At each step, keep the beam_width best nodes
+            for i in range(beam_width):
+                # Get the best node in the input Beam queue
+                score, n = in_nodes.get()
+                # Collect the values of the node to decode
+                dec_input = n.wordid
+                dec_hidden = n.hidden
+                input_feed = n.feed
+
+                # If we find an <EOS> token, then stop the decoding for this Beam
+                if n.wordid.item() in self.special_tokens_ids and n.prevnode != None:
+                    endnodes.append((score, n))
+                    # Break the loop if we have enough decoded sentences
+                    if len(endnodes) >= topk:
+                        break
+                    else:
+                        continue
+
+                # Decode with the RNN
+                dec_input = self.embedding(dec_input)  # (batch size, 1, emb dim)
+                dec_input = torch.cat((dec_input, input_feed), 2)
+                dec_output, dec_hidden = self.decode_rnn(dec_input, dec_hidden, enc_out)
+                out = self.gen(dec_output)
+                # Extract the top K most likely tokens and their log probability (log softmax)
+                log_prob, indexes = torch.topk(out, beam_width)
+
+                # Create a node for each of the K outputs and score them (sum of log probs div by length of sequence)
+                nextnodes = []
+                for new_k in range(beam_width):
+                    out_t = indexes[0][new_k].view(1, -1)
+                    log_p = log_prob[0][new_k].item()
+                    node = BeamSearchNode(dec_hidden, n, out_t, n.logp + log_p, n.leng + 1, dec_output)
+                    score = node.eval()
+                    nextnodes.append((score, node))
+                # Push the nodes to the output Beam queue
+                for i in range(len(nextnodes)):
+                    score, nn = nextnodes[i]
+                    out_nodes.put((score, nn))
+
+                # Break the loop if the input Beam is empty (only happens with <SOS> token at first step)
+                if len(in_nodes) == 0:
+                    break
+
+            # Fill the input Beam queue with the previously computed output Beam nodes
+            in_nodes = out_nodes
+            out_nodes = Beam()
+            # Stop decoding when we have enough output sequences
+            if len(endnodes) >= topk:
                 break
 
-            # fetch the best node
-            score, n = nodes.get()
-            dec_input = n.wordid
-            dec_hidden = n.h
-            if n.wordid.item() in self.special_tokens_ids and n.prevNode != None:
-                endnodes.append((score, n))
-                # if we reached maximum # of sentences required
-                if len(endnodes) >= number_required:
-                    break
-                else:
-                    continue
-            dec_input = self.embedding(dec_input)  # (batch size, 1, emb dim)
-            dec_input = torch.cat((dec_input, input_feed), 2)
-            dec_output, dec_hidden = self.decode_rnn(dec_input, dec_hidden, enc_out)
-            out = self.gen(dec_output)
-            input_feed = dec_output
-
-            # PUT HERE REAL BEAM SEARCH OF TOP
-            log_prob, indexes = torch.topk(out, beam_width)
-            nextnodes = []
-
-            for new_k in range(beam_width):
-                decoded_t = indexes[0][new_k].view(1, -1)
-                log_p = log_prob[0][new_k].item()
-
-                node = BeamSearchNode(dec_hidden, n, decoded_t, n.logp + log_p, n.leng + 1)
-                score = -node.eval()
-                nextnodes.append((score, node))
-            # put them into queue
-            for i in range(len(nextnodes)):
-                score, nn = nextnodes[i]
-                nodes.put((score, nn))
-                # increase qsize
-            qsize += len(nextnodes) - 1
-
-        # choose nbest paths, back trace them
+        # In the case where we did not encounter a <EOS> token, take the most likely sequences
         if len(endnodes) == 0:
-            endnodes = [nodes.get() for _ in range(topk)]
+            endnodes = [in_nodes.get() for _ in range(topk)]
 
+        # Now we unpack the sequences in reverse order to retrieve the sentences
         utterances = []
         for score, n in sorted(endnodes, key=operator.itemgetter(0)):
-            utterance = []
-            utterance.append(n.wordid.item())
-            # back trace
-            while n.prevNode != None:
-                n = n.prevNode
+            utterance= [n.wordid.item()]
+            while n.prevnode != None:
+                n = n.prevnode
                 utterance.append(n.wordid.item())
-
+            # Reverse the sentence
             utterance = utterance[::-1]
             utterances.append(utterance)
 
-        return utterances[0]
+        return utterances
 
     def greedy_decode(self, dec_hidden, enc_out):
         batch_size = enc_out.size(0)
@@ -352,18 +354,3 @@ class Attention(nn.Module):
         align_vectors = align_vectors.transpose(0, 1).contiguous()
 
         return attn_h.permute(1, 0, 2), align_vectors
-
-
-class BeamSearchNode(object):
-    def __init__(self, hiddenstate, previousNode, wordId, logProb, length):
-        self.h = hiddenstate
-        self.prevNode = previousNode
-        self.wordid = wordId
-        self.logp = logProb
-        self.leng = length
-
-    def eval(self, alpha=1.0):
-        reward = 0
-        # Add here a function for shaping a reward
-
-        return self.logp / float(self.leng - 1 + 1e-6) + alpha * reward

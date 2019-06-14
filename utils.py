@@ -182,9 +182,48 @@ class PriorityQueue(object):
             print()
             exit()
 
+
+class BeamSearchNode:
+    def __init__(self, hidden, prevnode, wordid, log_prob, length, inputfeed):
+        self.hidden = hidden
+        self.prevnode = prevnode
+        self.wordid = wordid
+        self.logp = log_prob
+        self.leng = length
+        self.feed = inputfeed
+
+    def eval(self, alpha=1.0):
+        reward = 0
+        # Add here a function for shaping a reward
+        return self.logp / float(self.leng - 1 + 1e-6) + alpha * reward
+
+
+class Beam:
+    def __init__(self):
+        self.queue = []
+
+    def __len__(self):
+        return len(self.queue)
+
+    def put(self, data):
+        self.queue.append(data)
+
+    def get(self):
+        try:
+            max = 0
+            for i in range(len(self.queue)):
+                if self.queue[i][0] > self.queue[max][0]:
+                    max = i
+            item = self.queue[max]
+            del self.queue[max]
+            return item
+        except IndexError:
+            print()
+            exit()
+
+
 # The below functions are modified versions of functions from:
 # https://github.com/huggingface/transfer-learning-conv-ai/blob/master/train.py (MIT License)
-
 def top_filtering(logits, top_k=0, top_p=0.0, threshold=-float('Inf'), filter_value=-float('Inf')):
     """ Filter a distribution of logits using top-k, top-p (nucleus) and/or threshold filtering
         Args:
