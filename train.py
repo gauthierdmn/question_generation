@@ -164,7 +164,8 @@ for epoch in range(hyper_params["num_epochs"]):
             # Stack the predictions into a tensor to compute the loss
             pred = dress_for_loss(pred)
             # Calculate Loss: softmax --> negative log likelihood
-            loss = criterion(pred.view(-1, pred.size(2)), question.view(-1))
+            #loss = criterion(pred.view(-1, pred.size(2)), question.view(-1))
+            loss = criterion(pred.view(-1, pred.size(2)), question[:, 1:].contiguous().view(-1))
 
             # Update the metrics
             num_non_padding, num_correct = correct_tokens(pred, question, padding_idx)
@@ -186,7 +187,7 @@ for epoch in range(hyper_params["num_epochs"]):
 
     # Save model weights with best validation error
     is_best = bool(mc.list_valid_loss[-1] < best_valid_loss)
-    best_valid_loss = min(mc.list_valid_loss, best_valid_loss)
+    best_valid_loss = min(mc.list_valid_loss[-1], best_valid_loss)
     save_checkpoint({
         "epoch": mc.epoch + epoch_checkpoint,
         "state_dict": model.state_dict(),

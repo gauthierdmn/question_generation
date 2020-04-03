@@ -125,7 +125,7 @@ class MetricReporter:
 
             print("{} perplexity of the model at epoch {} is: {}".format(set_name, self.epoch, perplexity))
         # Store the metrics in lists
-        if self.train:
+        if self.training:
             self.list_train_loss.append(loss)
             self.list_train_accuracy.append(accuracy)
             self.list_train_perplexity.append(perplexity)
