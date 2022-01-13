@@ -12,7 +12,7 @@ Markdown==3.1
 murmurhash==1.0.2
 numpy==1.16.2
 pandas==0.24.2
-Pillow==6.2.0
+Pillow==9.0.0
 plac==0.9.6
 preshed==2.0.1
 protobuf==3.7.1
