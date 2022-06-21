@@ -10,7 +10,7 @@ idna==2.8
 jsonschema==2.6.0
 Markdown==3.1
 murmurhash==1.0.2
-numpy==1.16.2
+numpy==1.22.0
 pandas==0.24.2
 Pillow==6.2.0
 plac==0.9.6
