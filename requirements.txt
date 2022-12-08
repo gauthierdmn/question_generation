@@ -1,6 +1,6 @@
 absl-py==0.7.1
 blis==0.2.4
-certifi==2019.3.9
+certifi==2022.12.7
 chardet==3.0.4
 ConfigArgParse==0.14.0
 cymem==2.0.2
